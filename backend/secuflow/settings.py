@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     
     # Local applications
     'accounts',
+    'tnm_integration',
 ]
 
 MIDDLEWARE = [
@@ -189,3 +190,15 @@ CORS_ALLOW_ALL_ORIGINS = True  # Development only, set to False in production
 
 # Allowed hosts
 ALLOWED_HOSTS = ['*']  # Development only, specify domains in production
+
+# TNM integration configuration
+TNM_JAVA_PATH = 'java'
+# Provide either TNM_JAR_PATH or TNM_RUN_SCRIPT (path to repo run.sh on UNIX / run.bat on Windows)
+TNM_JAR_PATH = None
+TNM_RUN_SCRIPT = None
+TNM_WORK_DIR = None  # Set to working directory for TNM if needed
+TNM_TIMEOUT = 1800  # seconds
+TNM_SQS_QUEUE_URL = None
+TNM_S3_BUCKET = None
+AWS_REGION = None
+AWS_ENDPOINT_URL = None  # e.g., 'http://localstack:4566' for local testing
