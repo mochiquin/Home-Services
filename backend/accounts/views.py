@@ -19,17 +19,23 @@ from .serializers import (
 def login_view(request):
     """
     User login endpoint.
-    Accepts username/password and returns JWT tokens with user information.
+    Accepts email/password and returns JWT tokens with user information.
     """
-    username = request.data.get('username')
+    email = request.data.get('email')
     password = request.data.get('password')
     
-    if not username or not password:
+    if not email or not password:
         return Response({
-            'error': 'Username and password are required'
+            'error': 'Email and password are required'
         }, status=status.HTTP_400_BAD_REQUEST)
-    
-    user = authenticate(username=username, password=password)
+    # Resolve username by email for authentication
+    try:
+        user_obj = User.objects.get(email=email)
+        username = user_obj.username
+    except User.DoesNotExist:
+        username = None
+
+    user = authenticate(username=username, password=password) if username else None
     if user and user.is_active:
         refresh = RefreshToken.for_user(user)
         return Response({
@@ -141,7 +147,7 @@ class UserViewSet(viewsets.ModelViewSet):
         
         # Separate user data from profile data
         user_fields = ['first_name', 'last_name', 'email']
-        profile_fields = ['phone', 'bio', 'avatar']
+        profile_fields = ['contact_email', 'first_name', 'last_name', 'avatar']
         
         for field in user_fields:
             if field in request.data:

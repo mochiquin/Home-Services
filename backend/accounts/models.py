@@ -12,17 +12,28 @@ class UserProfile(models.Model):
         related_name='profile',
         verbose_name="User"
     )
-    phone = models.CharField(
-        max_length=20, 
-        blank=True, 
-        verbose_name="Phone Number",
-        help_text="User's phone number"
+    contact_email = models.EmailField(
+        blank=True,
+        verbose_name="Contact Email",
+        help_text="Preferred contact email (defaults to account email)"
     )
-    bio = models.TextField(
-        max_length=500, 
-        blank=True, 
-        verbose_name="Biography",
-        help_text="Brief description about the user"
+    first_name = models.CharField(
+        max_length=150,
+        blank=True,
+        verbose_name="First name",
+        help_text="User given name stored on profile"
+    )
+    last_name = models.CharField(
+        max_length=150,
+        blank=True,
+        verbose_name="Last name",
+        help_text="User family name stored on profile"
+    )
+    username = models.CharField(
+        max_length=150,
+        blank=True,
+        verbose_name="Profile Username",
+        help_text="Auto-generated from first and last name"
     )
     avatar = models.ImageField(
         upload_to='avatars/', 
@@ -47,3 +58,15 @@ class UserProfile(models.Model):
         verbose_name = "User Profile"
         verbose_name_plural = "User Profiles"
         ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        # Default contact_email to the linked user's email if not provided
+        if not self.contact_email:
+            self.contact_email = self.user.email or ''
+        # Auto-generate profile username from first and last name if not set
+        if not self.username:
+            base_first = (self.first_name or '').strip()
+            base_last = (self.last_name or '').strip()
+            combined = f"{base_first}{base_last}".strip()
+            self.username = combined or self.user.username
+        super().save(*args, **kwargs)

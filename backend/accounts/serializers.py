@@ -21,8 +21,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = UserProfile
-        fields = ['user', 'phone', 'bio', 'avatar', 'created_at', 'updated_at']
-        read_only_fields = ['created_at', 'updated_at']
+        fields = ['user', 'contact_email', 'first_name', 'last_name', 'username', 'avatar', 'created_at', 'updated_at']
+        read_only_fields = ['username', 'created_at', 'updated_at']
 
 class UserDetailSerializer(serializers.ModelSerializer):
     """
@@ -55,19 +55,13 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = User
-        fields = ['username', 'email', 'password', 'password_confirm', 'first_name', 'last_name']
+        fields = ['email', 'password', 'password_confirm']
     
     def validate(self, data):
         """Validate that passwords match"""
         if data['password'] != data['password_confirm']:
             raise serializers.ValidationError("Passwords do not match")
         return data
-    
-    def validate_username(self, value):
-        """Validate that username is unique"""
-        if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError("A user with this username already exists")
-        return value
     
     def validate_email(self, value):
         """Validate that email is unique"""
@@ -78,9 +72,18 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create new user and associated profile"""
         validated_data.pop('password_confirm')
-        user = User.objects.create_user(**validated_data)
-        # Automatically create user profile
-        UserProfile.objects.create(user=user)
+        email = validated_data.get('email')
+        password = validated_data.get('password')
+        # Auto-generate a unique username from email local part
+        base_username = (email.split('@')[0] if email else 'user').strip() or 'user'
+        candidate = base_username
+        counter = 1
+        while User.objects.filter(username=candidate).exists():
+            counter += 1
+            candidate = f"{base_username}{counter}"
+        user = User.objects.create_user(username=candidate, email=email, password=password)
+        # Automatically create user profile and default contact_email to user's email
+        UserProfile.objects.create(user=user, contact_email=user.email)
         return user
 
 class PasswordChangeSerializer(serializers.Serializer):

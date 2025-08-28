@@ -11,7 +11,7 @@ class UserProfileInline(admin.StackedInline):
     model = UserProfile
     can_delete = False
     verbose_name_plural = 'User Profiles'
-    fields = ['phone', 'bio', 'avatar']
+    fields = ['contact_email', 'first_name', 'last_name', 'username', 'avatar']
     extra = 0
 
 class UserAdmin(BaseUserAdmin):
@@ -24,10 +24,10 @@ class UserAdmin(BaseUserAdmin):
     # Enhanced list display
     list_display = [
         'username', 'email', 'first_name', 'last_name', 
-        'is_active', 'is_staff', 'date_joined', 'get_profile_phone'
+        'is_active', 'is_staff', 'date_joined', 'get_contact_email', 'get_profile_username'
     ]
     list_filter = ['is_active', 'is_staff', 'is_superuser', 'date_joined']
-    search_fields = ['username', 'email', 'first_name', 'last_name', 'profile__phone']
+    search_fields = ['username', 'email', 'first_name', 'last_name', 'profile__contact_email']
     
     # Add profile information to fieldsets
     fieldsets = BaseUserAdmin.fieldsets + (
@@ -37,14 +37,22 @@ class UserAdmin(BaseUserAdmin):
         }),
     )
     
-    def get_profile_phone(self, obj):
-        """Display user's phone number in the admin list"""
+    def get_contact_email(self, obj):
+        """Display user's contact email in the admin list"""
         try:
-            return obj.profile.phone if obj.profile.phone else '-'
+            return obj.profile.contact_email or '-'
         except UserProfile.DoesNotExist:
             return '-'
-    get_profile_phone.short_description = 'Phone'
-    get_profile_phone.admin_order_field = 'profile__phone'
+    get_contact_email.short_description = 'Contact Email'
+    get_contact_email.admin_order_field = 'profile__contact_email'
+
+    def get_profile_username(self, obj):
+        try:
+            return obj.profile.username or '-'
+        except UserProfile.DoesNotExist:
+            return '-'
+    get_profile_username.short_description = 'Profile Username'
+    get_profile_username.admin_order_field = 'profile__username'
 
 # Unregister the default User admin and register our custom one
 admin.site.unregister(User)
@@ -56,11 +64,11 @@ class UserProfileAdmin(admin.ModelAdmin):
     Admin interface for UserProfile model.
     Provides detailed management of user profile information.
     """
-    list_display = ['user', 'phone', 'get_user_email', 'created_at', 'updated_at']
+    list_display = ['user', 'contact_email', 'first_name', 'last_name', 'username', 'get_user_email', 'created_at', 'updated_at']
     list_filter = ['created_at', 'updated_at']
     search_fields = [
         'user__username', 'user__email', 'user__first_name', 
-        'user__last_name', 'phone'
+        'user__last_name', 'contact_email', 'first_name', 'last_name', 'username'
     ]
     readonly_fields = ['created_at', 'updated_at']
     
@@ -70,11 +78,11 @@ class UserProfileAdmin(admin.ModelAdmin):
             'description': 'Associated user account'
         }),
         ('Contact Information', {
-            'fields': ('phone',),
+            'fields': ('contact_email',),
             'description': 'User contact details'
         }),
         ('Profile Details', {
-            'fields': ('bio', 'avatar'),
+            'fields': ('first_name', 'last_name', 'username', 'avatar'),
             'description': 'User profile information and avatar'
         }),
         ('Timestamps', {
