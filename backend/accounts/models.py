@@ -2,9 +2,9 @@ from django.db import models
 from django.contrib.auth.models import User
 
 class UserProfile(models.Model):
-    """
-    Extended user profile model to store additional user information.
-    Linked to Django's built-in User model via OneToOneField.
+    """Extended profile data for Django's built-in User.
+
+    Stores additional attributes such as avatar and display fields.
     """
     user = models.OneToOneField(
         User, 
@@ -52,7 +52,7 @@ class UserProfile(models.Model):
     )
 
     def __str__(self):
-        return f"{self.user.username} Profile"
+        return f"UserProfile(user_id={self.user_id})"
 
     class Meta:
         verbose_name = "User Profile"
