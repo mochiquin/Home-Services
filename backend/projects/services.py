@@ -524,8 +524,12 @@ class ProjectService:
             if not GitUtils.validate_repo_url(repo_url):
                 raise ValidationError("Invalid repository URL format")
             
-            # Create repository directory path
-            repo_dir = os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories', f"project_{project.id}")
+            # Create repository directory path (prefer env overrides)
+            repositories_root = os.getenv(
+                'TNM_REPOSITORIES_DIR',
+                os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories')
+            )
+            repo_dir = os.path.join(repositories_root, f"project_{project.id}")
             
             # Clone the repository
             clone_result = GitUtils.clone_repository(repo_url, repo_dir, branch)
@@ -565,7 +569,11 @@ class ProjectService:
             Dictionary with branches information
         """
         try:
-            repo_dir = os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories', f"project_{project.id}")
+            repositories_root = os.getenv(
+                'TNM_REPOSITORIES_DIR',
+                os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories')
+            )
+            repo_dir = os.path.join(repositories_root, f"project_{project.id}")
             
             if not os.path.exists(repo_dir):
                 raise ValidationError("Repository not found. Please clone the repository first.")
@@ -598,7 +606,11 @@ class ProjectService:
             Dictionary with switch result
         """
         try:
-            repo_dir = os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories', f"project_{project.id}")
+            repositories_root = os.getenv(
+                'TNM_REPOSITORIES_DIR',
+                os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories')
+            )
+            repo_dir = os.path.join(repositories_root, f"project_{project.id}")
             
             if not os.path.exists(repo_dir):
                 raise ValidationError("Repository not found. Please clone the repository first.")
@@ -640,7 +652,11 @@ class ProjectService:
                 raise ValidationError("Invalid repository URL format. Please provide a valid Git repository URL.")
             
             # Create a temporary directory for validation
-            temp_dir = os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories', 'temp_validation')
+            repositories_root = os.getenv(
+                'TNM_REPOSITORIES_DIR',
+                os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories')
+            )
+            temp_dir = os.path.join(repositories_root, 'temp_validation')
             
             # Try to clone the repository to validate it
             clone_result = GitUtils.clone_repository(repo_url, temp_dir)
