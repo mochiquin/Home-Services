@@ -68,6 +68,8 @@ services:
       # TNM Data Sharing
       - ./backend/tnm_output:/app/tnm_output
       - ./backend/tnm_repositories:/app/tnm_repositories
+      # SSH key for private repos (optional)
+      - ${SSH_PRIVATE_KEY:-./.ssh/id_rsa}:/home/django/.ssh/id_rsa:ro
     networks:
       - secuflow-network
     depends_on:
@@ -86,6 +88,7 @@ services:
       context: .
       dockerfile: docker/tnm.Dockerfile
     container_name: secuflow-tnm
+    command: ["tail", "-f", "/dev/null"]
     environment:
       - JAVA_OPTS=${JAVA_OPTS:--Xmx2g -Xms512m}
       - TNM_JAR_PATH=/app/tnm-cli.jar

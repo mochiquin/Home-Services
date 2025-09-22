@@ -24,6 +24,7 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     default-libmysqlclient-dev \
     git \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -43,8 +44,11 @@ ENV PATH=/home/django/.local/bin:$PATH
 ENV PYTHONPATH=/app
 
 # Create necessary directories
-RUN mkdir -p /app/staticfiles /app/media && \
-    chown -R django:django /app
+RUN mkdir -p /app/staticfiles /app/media /home/django/.ssh && \
+    ssh-keyscan github.com >> /home/django/.ssh/known_hosts && \
+    chown -R django:django /app /home/django/.ssh && \
+    chmod 700 /home/django/.ssh && \
+    chmod 644 /home/django/.ssh/known_hosts
 
 # Switch to non-root user
 USER django
