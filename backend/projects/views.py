@@ -43,7 +43,7 @@ from django.core.exceptions import ValidationError
 
 from .models import Project, ProjectMember
 from .serializers import (
-    ProjectSerializer, ProjectListSerializer, ProjectMemberSerializer,
+    ProjectSerializer, ProjectCreateSerializer, ProjectListSerializer, ProjectMemberSerializer,
     ProjectMemberCreateSerializer, ProjectStatsSerializer
 )
 from .services import ProjectService
@@ -74,6 +74,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """Return appropriate serializer based on action."""
         if self.action == 'list':
             return ProjectListSerializer
+        elif self.action == 'create':
+            return ProjectCreateSerializer
         return ProjectSerializer
     
     def get_queryset(self):
@@ -403,7 +405,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({
                 'error': 'Failed to update branch',
-                'details': 'An unexpected error occurred'
+                'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=True, methods=['get'])
@@ -478,7 +480,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({
                 'error': 'Failed to switch branch',
-                'details': 'An unexpected error occurred'
+                'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=False, methods=['post'])
