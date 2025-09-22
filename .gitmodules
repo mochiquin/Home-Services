@@ -1,0 +1,3 @@
+[submodule "tnm"]
+	path = tnm
+	url = https://github.com/JetBrains-Research/tnm.git
