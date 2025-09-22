@@ -20,15 +20,19 @@ cp docker.env .env
 # If you already cloned without --recursive, initialize submodules:
 git submodule update --init --recursive
 
-# 2. Start backend services
+# 2. Build TNM CLI locally (first time or after TNM changes)
+# Requires JDK 11+
+./tnm/gradlew :cli:shadowJar
+
+# 3. Start backend services
 docker-compose up -d --build
 
-# 3. Initialize database (first time only)
+# 4. Initialize database (first time only)
 docker-compose exec backend python manage.py migrate
 docker-compose exec backend python manage.py createsuperuser --username admin --email admin@example.com --noinput
 docker-compose exec backend python manage.py shell -c "from django.contrib.auth.models import User; u = User.objects.get(username='admin'); u.set_password('admin123'); u.save(); print('Password set successfully')"
 
-# 4. Start frontend
+# 5. Start frontend
 cd frontend
 pnpm install
 pnpm dev
