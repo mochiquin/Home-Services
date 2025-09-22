@@ -69,7 +69,7 @@ services:
       - ./backend/tnm_output:/app/tnm_output
       - ./backend/tnm_repositories:/app/tnm_repositories
       # SSH key for private repos (optional)
-      - ${SSH_PRIVATE_KEY:-./.ssh/id_rsa}:/home/django/.ssh/id_rsa:ro
+      - ${SSH_PRIVATE_KEY:-./.ssh/id_ed25519}:/home/django/.ssh/id_rsa:ro
     networks:
       - secuflow-network
     depends_on:
