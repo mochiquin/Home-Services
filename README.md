@@ -20,11 +20,21 @@ cp docker.env .env
 # 2. Start backend services
 docker-compose up -d --build
 
-# 3. Start frontend
+# 3. Initialize database (first time only)
+docker-compose exec backend python manage.py migrate
+docker-compose exec backend python manage.py createsuperuser --username admin --email admin@example.com --noinput
+docker-compose exec backend python manage.py shell -c "from django.contrib.auth.models import User; u = User.objects.get(username='admin'); u.set_password('admin123'); u.save(); print('Password set successfully')"
+
+# 4. Start frontend
 cd frontend
 pnpm install
 pnpm dev
 ```
+
+### Default Admin Account
+- **Username**: admin
+- **Email**: admin@example.com  
+- **Password**: admin123
 
 ### Access URLs
 - **Frontend**: http://localhost:3000
@@ -132,15 +142,47 @@ docker-compose logs -f [service]
 ```
 
 ### Database Operations
-```bash
-# Access MySQL
-docker-compose exec mysql mysql -u root -p
 
-# Run migrations
+#### Initial Setup (First Time)
+```bash
+# 1. Apply database migrations to create tables
 docker-compose exec backend python manage.py migrate
 
-# Create superuser
-docker-compose exec backend python manage.py createsuperuser
+# 2. Create superuser account
+docker-compose exec backend python manage.py createsuperuser --username admin --email admin@example.com --noinput
+
+# 3. Set superuser password
+docker-compose exec backend python manage.py shell -c "from django.contrib.auth.models import User; u = User.objects.get(username='admin'); u.set_password('admin123'); u.save(); print('Password set successfully')"
+```
+
+#### Daily Operations
+```bash
+# Access MySQL database
+docker-compose exec mysql mysql -u root -p
+
+# Access database with secuflow user
+docker-compose exec mysql mysql -u secuflow -psecuflow123 secuflow
+
+# Show all tables
+docker-compose exec mysql mysql -u secuflow -psecuflow123 secuflow -e "SHOW TABLES;"
+
+# Check migration status
+docker-compose exec backend python manage.py showmigrations
+
+# Create new migrations (after model changes)
+docker-compose exec backend python manage.py makemigrations
+
+# Apply new migrations
+docker-compose exec backend python manage.py migrate
+```
+
+#### Database Reset (Development Only)
+```bash
+# Reset database (WARNING: This will delete all data)
+docker-compose down
+docker volume rm secuflow_rebuild_mysql_data
+docker-compose up -d
+docker-compose exec backend python manage.py migrate
 ```
 
 ### Development Workflow

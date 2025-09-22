@@ -60,6 +60,13 @@ coverage/
 # Documentation
 README_CN.md
 DATABASE_DESIGN.md
+API文档.md
+
+# Postman / API Testing
+Postman_Environment.json
+Postman_Testing_Guide.md
+Postman测试指南.md
+Secuflow_API_Collection.json
 
 # TNM Analysis Data
 backend/tnm_output/
