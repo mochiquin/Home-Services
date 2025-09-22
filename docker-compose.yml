@@ -83,8 +83,8 @@ services:
   # TNM Analysis Service
   tnm:
     build:
-      context: ./tnm
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: docker/tnm.Dockerfile
     container_name: secuflow-tnm
     environment:
       - JAVA_OPTS=${JAVA_OPTS:--Xmx2g -Xms512m}
