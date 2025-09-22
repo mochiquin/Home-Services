@@ -12,10 +12,13 @@
 ### Setup & Run
 
 ```bash
-# 1. Clone and setup
-git clone <repository-url>
+# 1. Clone and setup (including submodules)
+git clone --recursive <repository-url>
 cd Secuflow_Rebuild
 cp docker.env .env
+
+# If you already cloned without --recursive, initialize submodules:
+git submodule update --init --recursive
 
 # 2. Start backend services
 docker-compose up -d --build

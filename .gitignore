@@ -45,6 +45,16 @@ node_modules/
 frontend/.env.local
 frontend/.env.*.local
 
+# SSH keys and configs (security)
+.ssh/
+**/id_rsa
+**/id_rsa.pub
+**/id_ed25519
+**/id_ed25519.pub
+**/*.pem
+**/*.key
+**/known_hosts
+
 # Logs
 logs/
 *.log

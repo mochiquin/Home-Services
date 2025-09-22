@@ -26,6 +26,20 @@ from .models import Project, ProjectMember
 from accounts.models import UserProfile
 
 
+class ProjectCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating new projects (without default_branch)."""
+    
+    class Meta:
+        model = Project
+        fields = ['name', 'repo_url']
+    
+    def validate_repo_url(self, value):
+        """Validate repository URL format."""
+        if not value.startswith(('http://', 'https://', 'git@')):
+            raise serializers.ValidationError("Repository URL must be a valid HTTP/HTTPS URL or Git SSH URL.")
+        return value
+
+
 class ProjectSerializer(serializers.ModelSerializer):
     """Serializer for Project model with owner information."""
     
