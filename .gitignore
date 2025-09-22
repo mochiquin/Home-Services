@@ -57,6 +57,14 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 
+# Documentation
+README_CN.md
+DATABASE_DESIGN.md
+
+# TNM Analysis Data
+backend/tnm_output/
+backend/tnm_repositories/
+
 # Misc
 *.swp
 *.swo
