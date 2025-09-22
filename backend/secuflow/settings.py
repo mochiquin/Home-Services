@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     
     # Local applications
     'accounts',
+    'projects',
     'tnm_integration',
 ]
 

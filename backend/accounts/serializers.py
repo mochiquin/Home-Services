@@ -21,8 +21,65 @@ class UserProfileSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = UserProfile
-        fields = ['user', 'contact_email', 'first_name', 'last_name', 'username', 'avatar', 'created_at', 'updated_at']
-        read_only_fields = ['username', 'created_at', 'updated_at']
+        fields = ['user', 'contact_email', 'display_name', 'avatar', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+class UserProfileUpdateSerializer(serializers.Serializer):
+    """
+    Serializer for updating user profile information.
+    Only allows updating contact_email, first_name, and last_name.
+    display_name is auto-generated from first_name + last_name.
+    Uses service layer for business logic.
+    """
+    first_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=150,
+        help_text="User's first name"
+    )
+    last_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=150,
+        help_text="User's last name"
+    )
+    contact_email = serializers.EmailField(
+        required=False,
+        allow_blank=True,
+        help_text="Contact email address"
+    )
+    
+    def validate_contact_email(self, value):
+        """Validate contact email if provided"""
+        if value and len(value.strip()) == 0:
+            return None
+        return value
+    
+    def validate_first_name(self, value):
+        """Validate first name if provided"""
+        if value and len(value.strip()) == 0:
+            return None
+        return value
+    
+    def validate_last_name(self, value):
+        """Validate last name if provided"""
+        if value and len(value.strip()) == 0:
+            return None
+        return value
+    
+    def update(self, instance, validated_data):
+        """
+        Update user profile using service layer.
+        This method is called by DRF but we delegate to service layer.
+        """
+        # Import here to avoid circular imports
+        from .services import UserProfileService
+        
+        # Use service layer for business logic
+        result = UserProfileService.update_user_profile(instance.user, validated_data)
+        
+        # Return the updated profile instance
+        return result['profile']
 
 class UserDetailSerializer(serializers.ModelSerializer):
     """
@@ -39,7 +96,9 @@ class UserDetailSerializer(serializers.ModelSerializer):
 class UserRegistrationSerializer(serializers.ModelSerializer):
     """
     Serializer for user registration.
-    Includes password confirmation and validation.
+    Only requires email, password, and password confirmation.
+    Username is automatically generated from email.
+    Display name defaults to email, can be updated later via profile update.
     """
     password = serializers.CharField(
         write_only=True, 
@@ -74,6 +133,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         validated_data.pop('password_confirm')
         email = validated_data.get('email')
         password = validated_data.get('password')
+        
         # Auto-generate a unique username from email local part
         base_username = (email.split('@')[0] if email else 'user').strip() or 'user'
         candidate = base_username
@@ -81,9 +141,20 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         while User.objects.filter(username=candidate).exists():
             counter += 1
             candidate = f"{base_username}{counter}"
-        user = User.objects.create_user(username=candidate, email=email, password=password)
-        # Automatically create user profile and default contact_email to user's email
-        UserProfile.objects.create(user=user, contact_email=user.email)
+        
+        # Create user with auto-generated username (no first_name, last_name)
+        user = User.objects.create_user(
+            username=candidate, 
+            email=email, 
+            password=password
+        )
+        
+        # Automatically create user profile
+        # display_name will be auto-generated in UserProfile.save() method (defaults to email)
+        UserProfile.objects.create(
+            user=user, 
+            contact_email=user.email
+        )
         return user
 
 class PasswordChangeSerializer(serializers.Serializer):

@@ -7,88 +7,110 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone
+from django.core.exceptions import ValidationError
 from .models import UserProfile
 from .serializers import (
     UserSerializer, UserDetailSerializer, UserProfileSerializer, 
-    UserRegistrationSerializer, PasswordChangeSerializer, UserUpdateSerializer
+    UserRegistrationSerializer, PasswordChangeSerializer, UserUpdateSerializer,
+    UserProfileUpdateSerializer
 )
+from .services import UserProfileService, UserService
 
 # Authentication Views
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
     """
-    User login endpoint.
+    User login endpoint using service layer.
     Accepts email/password and returns JWT tokens with user information.
     """
-    email = request.data.get('email')
-    password = request.data.get('password')
-    
-    if not email or not password:
-        return Response({
-            'error': 'Email and password are required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    # Resolve username by email for authentication
     try:
-        user_obj = User.objects.get(email=email)
-        username = user_obj.username
-    except User.DoesNotExist:
-        username = None
-
-    user = authenticate(username=username, password=password) if username else None
-    if user and user.is_active:
-        refresh = RefreshToken.for_user(user)
+        # Use service layer for authentication
+        auth_result = UserService.authenticate_user(
+            request.data.get('email'),
+            request.data.get('password')
+        )
+        
+        # Generate tokens
+        tokens = UserService.generate_tokens(auth_result['user'])
+        
         return Response({
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'user': UserDetailSerializer(user).data,
-            'message': 'Login successful'
+            'refresh': tokens['refresh'],
+            'access': tokens['access'],
+            'user': UserDetailSerializer(auth_result['user']).data,
+            'message': auth_result['message']
         })
-    else:
+        
+    except ValidationError as e:
         return Response({
-            'error': 'Invalid credentials or account is disabled'
+            'error': str(e)
         }, status=status.HTTP_401_UNAUTHORIZED)
+    except Exception as e:
+        return Response({
+            'error': 'Login failed',
+            'details': 'An unexpected error occurred'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_view(request):
     """
-    User registration endpoint.
+    User registration endpoint using service layer.
     Creates a new user account and returns JWT tokens.
     """
-    serializer = UserRegistrationSerializer(data=request.data)
-    if serializer.is_valid():
-        user = serializer.save()
-        refresh = RefreshToken.for_user(user)
+    try:
+        # Use service layer for registration
+        result = UserService.register_user(request.data)
+        
         return Response({
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'user': UserDetailSerializer(user).data,
-            'message': 'Registration successful'
+            'refresh': result['tokens']['refresh'],
+            'access': result['tokens']['access'],
+            'user': UserDetailSerializer(result['user']).data,
+            'message': result['message']
         }, status=status.HTTP_201_CREATED)
-    return Response({
-        'error': 'Registration failed',
-        'details': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
+        
+    except ValidationError as e:
+        return Response({
+            'error': 'Registration failed',
+            'details': str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response({
+            'error': 'Registration failed',
+            'details': 'An unexpected error occurred'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout_view(request):
     """
-    User logout endpoint.
+    User logout endpoint using service layer.
     Blacklists the provided refresh token.
     """
     try:
         refresh_token = request.data.get('refresh')
-        if refresh_token:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-        return Response({'message': 'Logout successful'})
-    except Exception as e:
+        if not refresh_token:
+            return Response({
+                'error': 'Refresh token is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Use service layer for logout
+        result = UserService.logout_user(refresh_token)
+        
+        return Response({
+            'message': result['message']
+        })
+        
+    except ValidationError as e:
         return Response({
             'error': 'Logout failed',
             'details': str(e)
         }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response({
+            'error': 'Logout failed',
+            'details': 'An unexpected error occurred'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class UserViewSet(viewsets.ModelViewSet):
     """
@@ -131,73 +153,91 @@ class UserViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def me(self, request):
-        """Get current user information"""
-        serializer = UserDetailSerializer(request.user)
-        return Response(serializer.data)
+        """Get current user information using service layer"""
+        try:
+            # Use service layer to get user details
+            result = UserService.get_user_detail(request.user)
+            
+            return Response(UserDetailSerializer(result['user']).data)
+            
+        except Exception as e:
+            return Response({
+                'error': 'Failed to get user information',
+                'details': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=False, methods=['put', 'patch'])
     def update_profile(self, request):
         """
-        Update current user profile information.
-        Handles both user basic info and profile data.
+        Update current user profile information using service layer.
+        Only allows updating contact_email, first_name, and last_name.
+        display_name is auto-generated from first_name + last_name.
         """
-        user = request.user
-        user_data = {}
-        profile_data = {}
-        
-        # Separate user data from profile data
-        user_fields = ['first_name', 'last_name', 'email']
-        profile_fields = ['contact_email', 'first_name', 'last_name', 'avatar']
-        
-        for field in user_fields:
-            if field in request.data:
-                user_data[field] = request.data[field]
-        
-        for field in profile_fields:
-            if field in request.data:
-                profile_data[field] = request.data[field]
-        
-        # Update user basic information
-        if user_data:
-            user_serializer = UserUpdateSerializer(user, data=user_data, partial=True)
-            if not user_serializer.is_valid():
-                return Response({
-                    'error': 'User data validation failed',
-                    'details': user_serializer.errors
-                }, status=status.HTTP_400_BAD_REQUEST)
-            user_serializer.save()
-        
-        # Update user profile
-        if profile_data:
-            profile, created = UserProfile.objects.get_or_create(user=user)
-            profile_serializer = UserProfileSerializer(profile, data=profile_data, partial=True)
-            if not profile_serializer.is_valid():
+        try:
+            # Validate input data
+            serializer = UserProfileUpdateSerializer(data=request.data, partial=True)
+            if not serializer.is_valid():
                 return Response({
                     'error': 'Profile data validation failed',
-                    'details': profile_serializer.errors
+                    'details': serializer.errors
                 }, status=status.HTTP_400_BAD_REQUEST)
-            profile_serializer.save()
-        
-        # Return updated user information
-        updated_user = User.objects.get(id=user.id)
-        return Response({
-            'user': UserDetailSerializer(updated_user).data,
-            'message': 'Profile updated successfully'
-        })
+            
+            # Use service layer for business logic
+            result = UserProfileService.update_user_profile(
+                request.user, 
+                serializer.validated_data
+            )
+            
+            # Return updated user information
+            return Response({
+                'user': UserDetailSerializer(result['user']).data,
+                'message': result['message']
+            })
+            
+        except ValidationError as e:
+            return Response({
+                'error': 'Profile update failed',
+                'details': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'Internal server error',
+                'details': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=False, methods=['post'])
     def change_password(self, request):
-        """Change user password with old password verification"""
-        serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
-            user = request.user
-            user.set_password(serializer.validated_data['new_password'])
-            user.save()
-            return Response({'message': 'Password changed successfully'})
-        return Response({
-            'error': 'Password change failed',
-            'details': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+        """Change user password using service layer"""
+        try:
+            # Validate input data
+            serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
+            if not serializer.is_valid():
+                return Response({
+                    'error': 'Password change validation failed',
+                    'details': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Use service layer for password change
+            result = UserService.change_password(
+                request.user,
+                serializer.validated_data['old_password'],
+                serializer.validated_data['new_password']
+            )
+            
+            return Response({
+                'message': result['message']
+            })
+            
+        except ValidationError as e:
+            return Response({
+                'error': 'Password change failed',
+                'details': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'Password change failed',
+                'details': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def toggle_active(self, request, pk=None):
@@ -224,7 +264,7 @@ class UserViewSet(viewsets.ModelViewSet):
 @permission_classes([IsAuthenticated])
 def user_stats(request):
     """
-    Get user statistics.
+    Get user statistics using service layer.
     Only accessible by staff members.
     """
     if not request.user.is_staff:
@@ -232,17 +272,26 @@ def user_stats(request):
             'error': 'Permission denied'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    stats = {
-        'total_users': User.objects.count(),
-        'active_users': User.objects.filter(is_active=True).count(),
-        'inactive_users': User.objects.filter(is_active=False).count(),
-        'staff_users': User.objects.filter(is_staff=True).count(),
-        'recent_users': User.objects.filter(
-            date_joined__gte=timezone.now() - timezone.timedelta(days=30)
-        ).count(),
-    }
-    
-    return Response(stats)
+    try:
+        # Use service layer to get user statistics
+        result = UserService.get_user_stats()
+        
+        # Add additional stats for admin view
+        stats = {
+            'total_users': result['total_users'],
+            'active_users': result['active_users'],
+            'inactive_users': User.objects.filter(is_active=False).count(),
+            'staff_users': User.objects.filter(is_staff=True).count(),
+            'recent_users': result['recent_users'],
+        }
+        
+        return Response(stats)
+        
+    except Exception as e:
+        return Response({
+            'error': 'Failed to get user statistics',
+            'details': 'An unexpected error occurred'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

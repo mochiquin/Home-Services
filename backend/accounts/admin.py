@@ -11,7 +11,7 @@ class UserProfileInline(admin.StackedInline):
     model = UserProfile
     can_delete = False
     verbose_name_plural = 'User Profiles'
-    fields = ['contact_email', 'first_name', 'last_name', 'username', 'avatar']
+    fields = ['contact_email', 'display_name', 'avatar']
     extra = 0
 
 class UserAdmin(BaseUserAdmin):
@@ -24,10 +24,10 @@ class UserAdmin(BaseUserAdmin):
     # Enhanced list display
     list_display = [
         'username', 'email', 'first_name', 'last_name', 
-        'is_active', 'is_staff', 'date_joined', 'get_contact_email', 'get_profile_username'
+        'is_active', 'is_staff', 'date_joined', 'get_contact_email', 'get_display_name'
     ]
     list_filter = ['is_active', 'is_staff', 'is_superuser', 'date_joined']
-    search_fields = ['username', 'email', 'first_name', 'last_name', 'profile__contact_email']
+    search_fields = ['username', 'email', 'first_name', 'last_name', 'profile__contact_email', 'profile__display_name']
     
     # Add profile information to fieldsets
     fieldsets = BaseUserAdmin.fieldsets + (
@@ -46,13 +46,13 @@ class UserAdmin(BaseUserAdmin):
     get_contact_email.short_description = 'Contact Email'
     get_contact_email.admin_order_field = 'profile__contact_email'
 
-    def get_profile_username(self, obj):
+    def get_display_name(self, obj):
         try:
-            return obj.profile.username or '-'
+            return obj.profile.display_name or '-'
         except UserProfile.DoesNotExist:
             return '-'
-    get_profile_username.short_description = 'Profile Username'
-    get_profile_username.admin_order_field = 'profile__username'
+    get_display_name.short_description = 'Display Name'
+    get_display_name.admin_order_field = 'profile__display_name'
 
 # Unregister the default User admin and register our custom one
 admin.site.unregister(User)
@@ -64,11 +64,11 @@ class UserProfileAdmin(admin.ModelAdmin):
     Admin interface for UserProfile model.
     Provides detailed management of user profile information.
     """
-    list_display = ['user', 'contact_email', 'first_name', 'last_name', 'username', 'get_user_email', 'created_at', 'updated_at']
+    list_display = ['user', 'contact_email', 'display_name', 'get_user_email', 'created_at', 'updated_at']
     list_filter = ['created_at', 'updated_at']
     search_fields = [
         'user__username', 'user__email', 'user__first_name', 
-        'user__last_name', 'contact_email', 'first_name', 'last_name', 'username'
+        'user__last_name', 'contact_email', 'display_name'
     ]
     readonly_fields = ['created_at', 'updated_at']
     
@@ -82,7 +82,7 @@ class UserProfileAdmin(admin.ModelAdmin):
             'description': 'User contact details'
         }),
         ('Profile Details', {
-            'fields': ('first_name', 'last_name', 'username', 'avatar'),
+            'fields': ('display_name', 'avatar'),
             'description': 'User profile information and avatar'
         }),
         ('Timestamps', {

@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 class UserProfile(models.Model):
     """Extended profile data for Django's built-in User.
 
-    Stores additional attributes such as avatar and display fields.
+    Stores additional attributes such as avatar and display name.
     """
     user = models.OneToOneField(
         User, 
@@ -17,23 +17,11 @@ class UserProfile(models.Model):
         verbose_name="Contact Email",
         help_text="Preferred contact email (defaults to account email)"
     )
-    first_name = models.CharField(
+    display_name = models.CharField(
         max_length=150,
         blank=True,
-        verbose_name="First name",
-        help_text="User given name stored on profile"
-    )
-    last_name = models.CharField(
-        max_length=150,
-        blank=True,
-        verbose_name="Last name",
-        help_text="User family name stored on profile"
-    )
-    username = models.CharField(
-        max_length=150,
-        blank=True,
-        verbose_name="Profile Username",
-        help_text="Auto-generated from first and last name"
+        verbose_name="Display Name",
+        help_text="Public display name (defaults to username)"
     )
     avatar = models.ImageField(
         upload_to='avatars/', 
@@ -52,7 +40,7 @@ class UserProfile(models.Model):
     )
 
     def __str__(self):
-        return f"UserProfile(user_id={self.user_id})"
+        return f"UserProfile(user_id={self.user_id}, display_name={self.display_name})"
 
     class Meta:
         verbose_name = "User Profile"
@@ -63,10 +51,11 @@ class UserProfile(models.Model):
         # Default contact_email to the linked user's email if not provided
         if not self.contact_email:
             self.contact_email = self.user.email or ''
-        # Auto-generate profile username from first and last name if not set
-        if not self.username:
-            base_first = (self.first_name or '').strip()
-            base_last = (self.last_name or '').strip()
-            combined = f"{base_first}{base_last}".strip()
-            self.username = combined or self.user.username
+        # Auto-generate display_name from first_name + last_name, fallback to email
+        first_name = (self.user.first_name or '').strip()
+        last_name = (self.user.last_name or '').strip()
+        if first_name or last_name:
+            self.display_name = f"{first_name} {last_name}".strip()
+        else:
+            self.display_name = self.user.email or self.user.username
         super().save(*args, **kwargs)

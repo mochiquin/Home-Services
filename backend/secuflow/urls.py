@@ -34,6 +34,7 @@ urlpatterns = [
     
     # API endpoints
     path('api/', include('accounts.urls')),
+    path('api/projects/', include('projects.urls')),
     path('api/tnm/', include('tnm_integration.urls')),
 ]
 
