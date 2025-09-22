@@ -41,6 +41,10 @@ node_modules/
 **/dist/
 **/build/
 
+# Gradle caches
+.gradle/
+**/.gradle/
+
 # Env files (frontend)
 frontend/.env.local
 frontend/.env.*.local
@@ -67,7 +71,7 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 
-# Documentation
+Documentation (keep tracked, comment out to include)
 README_CN.md
 DATABASE_DESIGN.md
 API文档.md
