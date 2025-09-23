@@ -2,19 +2,30 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.views import APIView
 from django.conf import settings
 import os
+import shutil
 from .services import TnmService
+from common.git_utils import GitUtils
 from projects.models import Project, ProjectMember
 from .models import TnmJob
 from .serializers import TnmJobCreateSerializer, TnmJobSerializer
+from common.response import ApiResponse
+from accounts.models import User, UserProfile
 import boto3
 import json
+import logging
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def run_tnm(request):
+	logger = logging.getLogger(__name__)
+	logger.info("TNM run_tnm endpoint called", extra={
+		'user': str(request.user),
+		'has_data': bool(request.data)
+	})
 	"""
 	Trigger TNM CLI to analyze a Git repository.
 	Request JSON:
@@ -28,6 +39,8 @@ def run_tnm(request):
 	command = payload.get('command')
 	options = payload.get('options', [])
 	args = payload.get('args', [])
+	# Default behavior: if no explicit command is provided, run the minimal preset
+	preset = payload.get('preset') or (None if command else 'basic')
 
 	# Authorization and project lookup
 	project_id = payload.get('project_id')
@@ -38,35 +51,60 @@ def run_tnm(request):
 		else:
 			project = getattr(request.user.profile, 'selected_project', None)
 			if not project:
-				return Response({'error': 'project_id is required (or set selected_project first)'}, status=status.HTTP_400_BAD_REQUEST)
+				return ApiResponse.error(
+				error_message='project_id is required (or set selected_project first)',
+				error_code="MISSING_PROJECT_ID"
+			)
 	except Project.DoesNotExist:
-		return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+			return ApiResponse.not_found('Project not found')
 	user_profile = request.user.profile
 	membership = project.members.filter(profile=user_profile).first()
 	if not (project.owner_profile == user_profile or (membership and membership.role in [ProjectMember.Role.OWNER, ProjectMember.Role.MAINTAINER])):
-		return Response({'error': 'Only project owner or maintainer can run TNM'}, status=status.HTTP_403_FORBIDDEN)
+		return ApiResponse.forbidden('Only project owner or maintainer can run TNM')
 
-	# Determine branch: prefer explicit payload, else use project's selected/default branch, else fallback
-	branch = payload.get('branch') or (project.default_branch or 'main')
+	# Default safe_mode to True unless explicitly set false
+	safe_mode = payload.get('safe_mode')
+	safe_mode = True if safe_mode is None else bool(safe_mode)
 
-	# Convenience: allow passing project_id/branch and build options automatically
+	# Convenience: allow passing project and auto-build options
 	if project and not options:
-		# Decide path prefixes based on docker mode (tnm runs inside container)
+		# Decide path prefixes. Prefer explicit env/settings; otherwise fall back to container-standard paths
 		docker_mode = os.getenv('TNM_DOCKER_MODE', 'false').lower() == 'true'
 		if docker_mode:
-			repos_root = '/data/repositories'
-			output_root = '/data/output'
+			repos_root = os.getenv('TNM_REPOSITORIES_DIR', '/data/repositories')
+			output_root = os.getenv('TNM_OUTPUT_DIR', '/data/output')
 		else:
-			repos_root = getattr(settings, 'TNM_REPOSITORIES_DIR', os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories'))
-			output_root = getattr(settings, 'TNM_OUTPUT_DIR', os.path.join(settings.BASE_DIR, 'backend', 'tnm_output'))
-		repo_git_path = f"{repos_root}/project_{project.id}/.git"
+			# Default to container-local canonical paths if settings are not provided
+			repos_root = getattr(settings, 'TNM_REPOSITORIES_DIR', os.getenv('TNM_REPOSITORIES_DIR', '/app/tnm_repositories'))
+			output_root = getattr(settings, 'TNM_OUTPUT_DIR', os.getenv('TNM_OUTPUT_DIR', '/app/tnm_output'))
+		repo_root_path = f"{repos_root}/project_{project.id}"
+		repo_git_path = f"{repo_root_path}/.git"
+		# Determine branch strictly from repository current branch
+		try:
+			branch = GitUtils.get_current_branch(repo_root_path)
+		except Exception:
+			branch = None
+		if not branch:
+			return ApiResponse.error('Current branch not found. Please use Switch Project Branch first.')
+		# Sanitize branch for filesystem paths (e.g., feature/x -> feature_x)
+		branch_fs = branch.replace('/', '_')
+		# Output directory per project+branch to avoid collisions
+		project_output_root = f"{output_root}/project_{project.id}_{branch_fs}"
+		# Ensure output directory exists
+		try:
+			os.makedirs(project_output_root, exist_ok=True)
+		except Exception:
+			pass
 		options = [
 			'--repository', repo_git_path,
-			'--developer-knowledge', f"{output_root}/DeveloperKnowledge.json",
-			'--files-ownership', f"{output_root}/FilesOwnership.json",
-			'--potential-ownership', f"{output_root}/PotentialAuthorship.json",
-			branch,
 		]
+		# Optional: only add excludes if explicitly allowed (some TNM builds do not support this option)
+		if os.getenv('TNM_ALLOW_EXCLUDES', 'false').lower() == 'true':
+			excludes = os.getenv('TNM_EXCLUDE_PATTERNS', 'docker/**,.github/**,docs/**').split(',')
+			for p in filter(None, map(str.strip, excludes)):
+				options += ['--exclude', p]
+		# Append branch as the final arg
+		options += [branch]
 
 	if not command:
 		# Default to FilesOwnershipMiner when only project_id is provided
@@ -77,22 +115,164 @@ def run_tnm(request):
 		tnm_jar=getattr(settings, 'TNM_JAR_PATH', None),
 		run_script=getattr(settings, 'TNM_RUN_SCRIPT', None),
 	)
+	# If safe_mode, prepare a temporary sparse workspace and point --repository to it
+	temp_repo_dir = None
+	if safe_mode and project and not payload.get('options'):
+		try:
+			allowed_suffixes = [
+				'.py','.ts','.tsx','.js','.jsx','.java','.kt','.go','.rb','.php','.cs',
+				'.c','.cpp','.h','.hpp','.rs','.swift','.m','.mm','.sql','.sh','.yaml',
+				'.yml','.json','.xml','.gradle','.kts','.ini','.toml','.cfg','.conf',
+			]
+			excluded_dirs = ['docker', '.github', 'docs']
+			temp_repo_dir, pruned_commit_sha = service.prepare_sparse_workspace(
+				source_repo_path=repo_root_path,
+				branch=branch,
+				allowed_suffixes=allowed_suffixes,
+				excluded_directories=excluded_dirs,
+			)
+			# Replace repository path to temp workspace
+			for i in range(len(options)):
+				if options[i] == '--repository' and i + 1 < len(options):
+					options[i+1] = f"{temp_repo_dir}/.git"
+			# Ensure TNM analyzes the pruned branch (CLI expects a branch name)
+			if options:
+				options[-1] = 'safe-mode-pruned'
+		except Exception as e:
+			logger.exception('safe_mode preparation failed')
+			return ApiResponse.error('safe_mode preparation failed', data={'detail': str(e)})
+
 	try:
+		def _copy_outputs():
+			try:
+				import json
+				docker_mode = os.getenv('TNM_DOCKER_MODE', 'false').lower() == 'true'
+				# Prefer per-project output dir to be the authoritative location: if TNM_OUTPUT_DIR points elsewhere,
+				# ensure we still pull from that root and the known fallback
+				output_root_global = os.getenv('TNM_OUTPUT_DIR', '/data/output' if docker_mode else '/app/tnm_output')
+				# Note: BASE_DIR already points to backend/; do not append another 'backend'
+				fallback_result_dir = os.path.join(getattr(settings, 'BASE_DIR', '/app'), 'result')
+				# 新增：检查项目输出目录中的result子目录
+				project_result_dir = os.path.join(project_output_root, 'result')
+				candidate_dirs = [project_result_dir, fallback_result_dir, output_root_global]
+				
+				filenames = [
+					'idToUser.json', 'idToFile.json', 'idToUser', 'idToFile',
+					'DeveloperKnowledge.json', 'FilesOwnership.json', 'PotentialAuthorship.json',
+					'AssignmentMatrix.json', 'FileDependencyMatrix.json', 'CommitInfluenceGraph.json',
+					'WorkTimeData.json', 'CoEditNetworks.json', 'ComplexityData.json',
+					'PageRankResult.json', 'CoordinationMatrix.json', 'CongruenceResult.json',
+					'AssignmentMatrix', 'FileDependencyMatrix', 'CoEdits', 'idToCommit',
+				]
+				os.makedirs(project_output_root, exist_ok=True)
+				logger.info(f"Processing outputs from candidate dirs: {candidate_dirs} to {project_output_root}")
+				copied_files = []
+				
+				for d in candidate_dirs:
+					if os.path.isdir(d):
+						logger.info(f"Checking directory: {d}")
+						for name in filenames:
+							src = os.path.join(d, name)
+							if os.path.isfile(src):
+								try:
+									# Normalize target name: ensure .json extension
+									target_name = name if name.endswith('.json') else f"{name}.json"
+									dest = os.path.join(project_output_root, target_name)
+									
+									# 读取源文件内容
+									with open(src, 'r', encoding='utf-8') as f:
+										content = f.read().strip()
+									
+									# 检查内容是否已经是有效的JSON
+									try:
+										json_data = json.loads(content)
+										# 如果已经是JSON，直接写入格式化的JSON
+										with open(dest, 'w', encoding='utf-8') as f:
+											json.dump(json_data, f, indent=2, ensure_ascii=False)
+									except json.JSONDecodeError:
+										# 如果不是JSON，尝试作为简单的字符串处理
+										logger.warning(f"File {src} is not valid JSON, treating as plain text")
+										with open(dest, 'w', encoding='utf-8') as f:
+											json.dump({"content": content}, f, indent=2, ensure_ascii=False)
+									
+									copied_files.append(f"{src} -> {dest}")
+									logger.info(f"Processed and converted: {name} -> {target_name}")
+								except Exception as e:
+									logger.warning(f"Failed to process {src}: {e}")
+					else:
+						logger.info(f"Directory not found: {d}")
+				
+				# 清理result子目录（如果存在的话）
+				if os.path.isdir(project_result_dir) and copied_files:
+					try:
+						shutil.rmtree(project_result_dir)
+						logger.info(f"Cleaned up result subdirectory: {project_result_dir}")
+					except Exception as e:
+						logger.warning(f"Failed to clean up result directory: {e}")
+				
+				logger.info(f"Total files processed: {len(copied_files)}")
+			except Exception as e:
+				logger.exception(f"Error in _copy_outputs: {e}")
+
+		# Preset basic: run minimal miners for downstream calculations
+		if preset == 'basic':
+			results = []
+			# Determine which repo path to use (temp safe_mode or original)
+			repo_arg = None
+			for i in range(len(options)):
+				if options[i] == '--repository' and i + 1 < len(options):
+					repo_arg = options[i+1]
+					break
+			if not repo_arg:
+				repo_arg = repo_git_path
+			branch_arg = options[-1] if options else branch
+			for cmd in ['AssignmentMatrixMiner', 'FileDependencyMatrixMiner', 'CoEditNetworksMiner']:
+				proc = service.run_cli(
+					cmd,
+					['--repository', repo_arg],
+					[branch_arg],
+					cwd=project_output_root,
+					timeout=getattr(settings, 'TNM_TIMEOUT', None)
+				)
+				results.append({
+					'command': proc.args,
+					'returncode': proc.returncode,
+					'stdout': proc.stdout,
+					'stderr': proc.stderr,
+				})
+			_copy_outputs()
+			ok = all(r['returncode'] == 0 for r in results)
+			return ApiResponse.success({'runs': results}) if ok else ApiResponse.error('One or more miners failed', data={'runs': results})
+
+		# Single-command path
+		work_dir = project_output_root if project else getattr(settings, 'TNM_WORK_DIR', None)
 		proc = service.run_cli(
 			command,
 			options,
 			args,
-			cwd=getattr(settings, 'TNM_WORK_DIR', None),
+			cwd=work_dir,
 			timeout=getattr(settings, 'TNM_TIMEOUT', None)
 		)
-		return Response({
+		_copy_outputs()
+		data = {
 			'command': proc.args,
 			'returncode': proc.returncode,
 			'stdout': proc.stdout,
 			'stderr': proc.stderr,
-		}, status=status.HTTP_200_OK if proc.returncode == 0 else status.HTTP_400_BAD_REQUEST)
+		}
+		if proc.returncode == 0:
+			return ApiResponse.success(data=data)
+		else:
+			return ApiResponse.error('TNM returned non-zero code', data=data)
 	except Exception as e:
-		return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+		logger.exception('TNM execution failed')
+		return ApiResponse.error('TNM execution failed', data={'detail': str(e)})
+	finally:
+		if temp_repo_dir:
+			try:
+				shutil.rmtree(temp_repo_dir, ignore_errors=True)
+			except Exception:
+				pass
 
 
 @api_view(['POST'])
@@ -100,12 +280,12 @@ def run_tnm(request):
 def create_job(request):
 	serializer = TnmJobCreateSerializer(data=request.data)
 	if not serializer.is_valid():
-		return Response({'error': 'invalid payload', 'details': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+		return ApiResponse.error('invalid payload', data=serializer.errors)
 	job: TnmJob = serializer.save(created_by=request.user, status='queued')
 	# enqueue to SQS
 	sqs_url = getattr(settings, 'TNM_SQS_QUEUE_URL', None)
 	if not sqs_url:
-		return Response({'error': 'TNM_SQS_QUEUE_URL not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+		return ApiResponse.internal_error('TNM_SQS_QUEUE_URL not configured')
 	client = boto3.client(
 		'sqs',
 		region_name=getattr(settings, 'AWS_REGION', None),
@@ -120,7 +300,7 @@ def create_job(request):
 		'args': job.args,
 	}
 	client.send_message(QueueUrl=sqs_url, MessageBody=json.dumps(msg))
-	return Response({'id': job.id}, status=status.HTTP_201_CREATED)
+	return ApiResponse.created({'id': job.id})
 
 
 @api_view(['GET'])
@@ -129,7 +309,7 @@ def job_detail(request, pk: int):
 	try:
 		job = TnmJob.objects.get(pk=pk)
 	except TnmJob.DoesNotExist:
-		return Response({'error': 'not found'}, status=status.HTTP_404_NOT_FOUND)
-	return Response(TnmJobSerializer(job).data)
+		return ApiResponse.not_found('not found')
+	return ApiResponse.success(TnmJobSerializer(job).data)
 
 

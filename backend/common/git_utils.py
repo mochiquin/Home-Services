@@ -120,12 +120,107 @@ class GitUtils:
                     unique_branches.append(branch)
                     seen.add(branch['name'])
             
+            # Batch get commit hashes for all branches
+            if unique_branches:
+                commit_hashes = GitUtils._get_batch_commit_hashes(repo_path, [b['name'] for b in unique_branches])
+                
+                # Add commit hash and branch_id to each branch
+                for i, branch in enumerate(unique_branches):
+                    commit_hash = commit_hashes.get(branch['name'])
+                    branch['commit_hash'] = commit_hash
+                    
+                    # Generate unique branch ID using name + commit hash
+                    import hashlib
+                    branch_id_source = f"{branch['name']}:{commit_hash or 'unknown'}"
+                    branch['branch_id'] = hashlib.md5(branch_id_source.encode()).hexdigest()
+            
             return sorted(unique_branches, key=lambda x: x['name'])
             
         except subprocess.TimeoutExpired:
             raise ValidationError("Git operation timed out")
         except Exception as e:
             raise ValidationError(f"Failed to get repository branches: {str(e)}")
+    
+    @staticmethod
+    def _get_batch_commit_hashes(repo_path: str, branch_names: List[str]) -> Dict[str, str]:
+        """
+        Batch get commit hashes for multiple branches using a single git command.
+        
+        Args:
+            repo_path: Path to the Git repository
+            branch_names: List of branch names
+            
+        Returns:
+            Dictionary mapping branch names to commit hashes
+        """
+        try:
+            if not branch_names:
+                return {}
+            
+            # Use git for-each-ref to get commit hashes for all branches at once
+            cmd = ['git', 'for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/heads/']
+            result = subprocess.run(
+                cmd,
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0:
+                # Fallback to individual git rev-parse commands
+                return GitUtils._get_individual_commit_hashes(repo_path, branch_names)
+            
+            commit_hashes = {}
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    parts = line.strip().split(' ', 1)
+                    if len(parts) == 2:
+                        branch_name, commit_hash = parts
+                        if branch_name in branch_names:
+                            commit_hashes[branch_name] = commit_hash
+            
+            # Fill in missing branches with individual lookups
+            missing_branches = [name for name in branch_names if name not in commit_hashes]
+            if missing_branches:
+                individual_hashes = GitUtils._get_individual_commit_hashes(repo_path, missing_branches)
+                commit_hashes.update(individual_hashes)
+            
+            return commit_hashes
+            
+        except Exception:
+            # Fallback to individual git rev-parse commands
+            return GitUtils._get_individual_commit_hashes(repo_path, branch_names)
+    
+    @staticmethod
+    def _get_individual_commit_hashes(repo_path: str, branch_names: List[str]) -> Dict[str, str]:
+        """
+        Fallback method to get commit hashes individually.
+        
+        Args:
+            repo_path: Path to the Git repository
+            branch_names: List of branch names
+            
+        Returns:
+            Dictionary mapping branch names to commit hashes
+        """
+        commit_hashes = {}
+        for branch_name in branch_names:
+            try:
+                cmd = ['git', 'rev-parse', branch_name]
+                result = subprocess.run(
+                    cmd,
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    commit_hashes[branch_name] = result.stdout.strip()
+            except Exception:
+                continue
+        
+        return commit_hashes
     
     @staticmethod
     def get_current_branch(repo_path: str) -> str:
