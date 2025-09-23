@@ -706,42 +706,28 @@ class ProjectService:
     @staticmethod
     def validate_and_clone_repository(repo_url, user_profile):
         """
-        Validate repository URL and clone it for project creation.
+        Validate repository URL and get basic information without full clone.
         
         Args:
             repo_url: Git repository URL
             user_profile: UserProfile instance
             
         Returns:
-            Dictionary with validation and clone result
+            Dictionary with validation result
         """
         try:
-            # Validate repository URL
+            # Validate repository URL format
             if not GitUtils.validate_repo_url(repo_url):
                 raise ValidationError("Invalid repository URL format. Please provide a valid Git repository URL.")
             
-            # Create a temporary directory for validation
-            repositories_root = os.getenv(
-                'TNM_REPOSITORIES_DIR',
-                os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories')
-            )
-            temp_dir = os.path.join(repositories_root, 'temp_validation')
-            
-            # Try to clone the repository to validate it
-            clone_result = GitUtils.clone_repository(repo_url, temp_dir)
-            
-            # Get branches information
-            branches = GitUtils.get_repository_branches(temp_dir)
-            current_branch = GitUtils.get_current_branch(temp_dir)
-            
-            # Clean up temporary directory
-            GitUtils.cleanup_repository(temp_dir)
+            # Use lightweight validation - just check if repository is accessible
+            validation_result = GitUtils.validate_repository_access(repo_url)
             
             return {
                 'success': True,
                 'message': 'Repository validation successful',
-                'branches': branches,
-                'default_branch': current_branch,
+                'branches': validation_result.get('branches', []),
+                'default_branch': validation_result.get('default_branch', 'main'),
                 'repo_url': repo_url
             }
             

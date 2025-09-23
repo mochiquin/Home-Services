@@ -206,6 +206,68 @@ class GitUtils:
             raise ValidationError(f"Failed to checkout branch: {str(e)}")
     
     @staticmethod
+    def validate_repository_access(repo_url: str) -> Dict:
+        """
+        Lightweight validation of repository access without cloning.
+        Uses git ls-remote to check repository accessibility and get branch info.
+        
+        Args:
+            repo_url: Repository URL to validate
+            
+        Returns:
+            Dictionary with validation result and basic info
+        """
+        try:
+            # Use git ls-remote to get remote references without cloning
+            cmd = ['git', 'ls-remote', '--heads', repo_url]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30  # 30 seconds timeout
+            )
+            
+            if result.returncode != 0:
+                raise ValidationError(f"Repository not accessible: {result.stderr}")
+            
+            # Parse branch information from ls-remote output
+            branches = []
+            default_branch = 'main'
+            
+            for line in result.stdout.strip().split('\n'):
+                if line and '\trefs/heads/' in line:
+                    branch_name = line.split('refs/heads/')[-1]
+                    branches.append({
+                        'name': branch_name,
+                        'is_current': False
+                    })
+                    
+                    # Determine default branch (prefer main, then master, then first branch)
+                    if branch_name in ['main', 'master']:
+                        default_branch = branch_name
+            
+            # If no branches found, use first branch or default
+            if branches and default_branch not in [b['name'] for b in branches]:
+                default_branch = branches[0]['name']
+            
+            # Mark default branch as current
+            for branch in branches:
+                if branch['name'] == default_branch:
+                    branch['is_current'] = True
+                    break
+            
+            return {
+                'accessible': True,
+                'branches': branches,
+                'default_branch': default_branch
+            }
+            
+        except subprocess.TimeoutExpired:
+            raise ValidationError("Repository validation timeout - repository may be inaccessible")
+        except Exception as e:
+            raise ValidationError(f"Repository validation failed: {str(e)}")
+
+    @staticmethod
     def validate_repo_url(repo_url: str) -> bool:
         """
         Validate if the repository URL is valid.

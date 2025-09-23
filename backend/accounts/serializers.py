@@ -23,6 +23,16 @@ class UserProfileSerializer(serializers.ModelSerializer):
         fields = ['user', 'contact_email', 'display_name', 'avatar', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
+class UserProfileSimpleSerializer(serializers.ModelSerializer):
+    """
+    Simplified user profile serializer without nested user data.
+    Used to avoid circular references in UserDetailSerializer.
+    """
+    class Meta:
+        model = UserProfile
+        fields = ['contact_email', 'display_name', 'avatar', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
 class UserProfileUpdateSerializer(serializers.Serializer):
     """
     Serializer for updating user profile information.
@@ -85,7 +95,7 @@ class UserDetailSerializer(serializers.ModelSerializer):
     Detailed user serializer that includes profile information.
     Used for complete user information display.
     """
-    profile = UserProfileSerializer(read_only=True)
+    profile = UserProfileSimpleSerializer(read_only=True)
     
     class Meta:
         model = User
