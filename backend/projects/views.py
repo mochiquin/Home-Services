@@ -48,6 +48,7 @@ from .serializers import (
 )
 from .services import ProjectService
 from accounts.models import UserProfile
+from common.response import ApiResponse
 
 
 class ProjectPagination(PageNumberPagination):
@@ -99,18 +100,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
             result = ProjectService.create_project(request.data, user_profile)
             
             serializer = self.get_serializer(result['project'])
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return ApiResponse.created(
+                data=serializer.data,
+                message=result.get('message', 'Project created successfully')
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Project creation failed',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="PROJECT_CREATION_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Project creation failed',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Project creation failed",
+                error_code="PROJECT_CREATION_ERROR"
+            )
     
     def get_permissions(self):
         """Set permissions based on action."""
@@ -128,19 +132,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
             
             # Use service layer to check access
             if not ProjectService.check_project_access(project, user_profile):
-                return Response(
-                    {'error': 'You do not have permission to view this project.'},
-                    status=status.HTTP_403_FORBIDDEN
+                return ApiResponse.forbidden(
+                    error_message="You do not have permission to view this project",
+                    error_code="ACCESS_DENIED"
                 )
             
             serializer = self.get_serializer(project)
-            return Response(serializer.data)
+            return ApiResponse.success(
+                data=serializer.data,
+                message="Project retrieved successfully"
+            )
             
         except Exception as e:
-            return Response({
-                'error': 'Failed to retrieve project',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to retrieve project",
+                error_code="PROJECT_RETRIEVAL_ERROR"
+            )
     
     def update(self, request, *args, **kwargs):
         """Update project using service layer."""
@@ -152,18 +159,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
             result = ProjectService.update_project(project, request.data, user_profile)
             
             serializer = self.get_serializer(result['project'])
-            return Response(serializer.data)
+            return ApiResponse.success(
+                data=serializer.data,
+                message=result.get('message', 'Project updated successfully')
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Project update failed',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="PROJECT_UPDATE_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Project update failed',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Project update failed",
+                error_code="PROJECT_UPDATE_ERROR"
+            )
     
     def destroy(self, request, *args, **kwargs):
         """Delete project using service layer."""
@@ -174,20 +184,20 @@ class ProjectViewSet(viewsets.ModelViewSet):
             # Use service layer to delete project
             result = ProjectService.delete_project(project, user_profile)
             
-            return Response({
-                'message': result['message']
-            }, status=status.HTTP_200_OK)
+            return ApiResponse.success(
+                message=result['message']
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Project deletion failed',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="PROJECT_DELETION_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Project deletion failed',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Project deletion failed",
+                error_code="PROJECT_DELETION_ERROR"
+            )
     
     @action(detail=True, methods=['get'])
     def members(self, request, pk=None):
@@ -200,18 +210,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
             result = ProjectService.get_project_members(project, user_profile)
             
             serializer = ProjectMemberSerializer(result['members'], many=True)
-            return Response(serializer.data)
+            return ApiResponse.success(
+                data=serializer.data,
+                message=result.get('message', 'Project members retrieved successfully')
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Failed to get project members',
-                'details': str(e)
-            }, status=status.HTTP_403_FORBIDDEN)
+            return ApiResponse.forbidden(
+                error_message=str(e),
+                error_code="ACCESS_DENIED"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Failed to get project members',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to get project members",
+                error_code="MEMBERS_RETRIEVAL_ERROR"
+            )
     
     @action(detail=True, methods=['post'])
     def add_member(self, request, pk=None):
@@ -224,26 +237,30 @@ class ProjectViewSet(viewsets.ModelViewSet):
             role = request.data.get('role', ProjectMember.Role.REVIEWER)
             
             if not username:
-                return Response({
-                    'error': 'Username is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return ApiResponse.error(
+                    error_message="Username is required",
+                    error_code="MISSING_USERNAME"
+                )
             
             # Use service layer to add member
             result = ProjectService.add_project_member(project, username, role, user_profile)
             
             serializer = ProjectMemberSerializer(result['member'])
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return ApiResponse.created(
+                data=serializer.data,
+                message=result.get('message', 'Member added successfully')
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Failed to add member',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="MEMBER_ADDITION_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Failed to add member',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to add member",
+                error_code="MEMBER_ADDITION_ERROR"
+            )
     
     
     
@@ -254,11 +271,19 @@ class ProjectViewSet(viewsets.ModelViewSet):
             project = self.get_object()
             user_profile = request.user.profile
             result = ProjectService.remove_project_member_by_user_id(project, user_id, user_profile)
-            return Response({'message': result['message']}, status=status.HTTP_200_OK)
+            return ApiResponse.success(
+                message=result['message']
+            )
         except ValidationError as e:
-            return Response({'error': 'Failed to remove member', 'details': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="MEMBER_REMOVAL_ERROR"
+            )
         except Exception:
-            return Response({'error': 'Failed to remove member', 'details': 'An unexpected error occurred'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to remove member",
+                error_code="MEMBER_REMOVAL_ERROR"
+            )
 
     
 
@@ -270,14 +295,26 @@ class ProjectViewSet(viewsets.ModelViewSet):
             user_profile = request.user.profile
             new_role = request.data.get('role')
             if not new_role:
-                return Response({'error': 'Role is required'}, status=status.HTTP_400_BAD_REQUEST)
+                return ApiResponse.error(
+                    error_message="Role is required",
+                    error_code="MISSING_ROLE"
+                )
             result = ProjectService.update_member_role_by_user_id(project, user_id, new_role, user_profile)
             serializer = ProjectMemberSerializer(result['member'])
-            return Response(serializer.data)
+            return ApiResponse.success(
+                data=serializer.data,
+                message=result.get('message', 'Member role updated successfully')
+            )
         except ValidationError as e:
-            return Response({'error': 'Failed to update member role', 'details': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="MEMBER_ROLE_UPDATE_ERROR"
+            )
         except Exception:
-            return Response({'error': 'Failed to update member role', 'details': 'An unexpected error occurred'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to update member role",
+                error_code="MEMBER_ROLE_UPDATE_ERROR"
+            )
     
     @action(detail=False, methods=['get'])
     def my_projects(self, request):

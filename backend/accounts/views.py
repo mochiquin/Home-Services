@@ -15,6 +15,7 @@ from .serializers import (
     UserProfileUpdateSerializer
 )
 from .services import UserProfileService, UserService
+from common.response import ApiResponse
 
 # Authentication Views
 @api_view(['POST'])
@@ -34,22 +35,25 @@ def login_view(request):
         # Generate tokens
         tokens = UserService.generate_tokens(auth_result['user'])
         
-        return Response({
-            'refresh': tokens['refresh'],
-            'access': tokens['access'],
-            'user': UserDetailSerializer(auth_result['user']).data,
-            'message': auth_result['message']
-        })
+        return ApiResponse.success(
+            data={
+                'refresh': tokens['refresh'],
+                'access': tokens['access'],
+                'user': UserDetailSerializer(auth_result['user']).data
+            },
+            message=auth_result['message']
+        )
         
     except ValidationError as e:
-        return Response({
-            'error': str(e)
-        }, status=status.HTTP_401_UNAUTHORIZED)
+        return ApiResponse.unauthorized(
+            error_message=str(e),
+            error_code="INVALID_CREDENTIALS"
+        )
     except Exception as e:
-        return Response({
-            'error': 'Login failed',
-            'details': 'An unexpected error occurred'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return ApiResponse.internal_error(
+            error_message="Login failed",
+            error_code="LOGIN_ERROR"
+        )
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -62,23 +66,25 @@ def register_view(request):
         # Use service layer for registration
         result = UserService.register_user(request.data)
         
-        return Response({
-            'refresh': result['tokens']['refresh'],
-            'access': result['tokens']['access'],
-            'user': UserDetailSerializer(result['user']).data,
-            'message': result['message']
-        }, status=status.HTTP_201_CREATED)
+        return ApiResponse.created(
+            data={
+                'refresh': result['tokens']['refresh'],
+                'access': result['tokens']['access'],
+                'user': UserDetailSerializer(result['user']).data
+            },
+            message=result['message']
+        )
         
     except ValidationError as e:
-        return Response({
-            'error': 'Registration failed',
-            'details': str(e)
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return ApiResponse.error(
+            error_message=str(e),
+            error_code="REGISTRATION_ERROR"
+        )
     except Exception as e:
-        return Response({
-            'error': 'Registration failed',
-            'details': 'An unexpected error occurred'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return ApiResponse.internal_error(
+            error_message="Registration failed",
+            error_code="REGISTRATION_ERROR"
+        )
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -90,27 +96,28 @@ def logout_view(request):
     try:
         refresh_token = request.data.get('refresh')
         if not refresh_token:
-            return Response({
-                'error': 'Refresh token is required'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message="Refresh token is required",
+                error_code="MISSING_TOKEN"
+            )
         
         # Use service layer for logout
         result = UserService.logout_user(refresh_token)
         
-        return Response({
-            'message': result['message']
-        })
+        return ApiResponse.success(
+            message=result['message']
+        )
         
     except ValidationError as e:
-        return Response({
-            'error': 'Logout failed',
-            'details': str(e)
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return ApiResponse.error(
+            error_message=str(e),
+            error_code="LOGOUT_ERROR"
+        )
     except Exception as e:
-        return Response({
-            'error': 'Logout failed',
-            'details': 'An unexpected error occurred'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return ApiResponse.internal_error(
+            error_message="Logout failed",
+            error_code="LOGOUT_ERROR"
+        )
 
 class UserViewSet(viewsets.ModelViewSet):
     """
@@ -158,13 +165,16 @@ class UserViewSet(viewsets.ModelViewSet):
             # Use service layer to get user details
             result = UserService.get_user_detail(request.user)
             
-            return Response(UserDetailSerializer(result['user']).data)
+            return ApiResponse.success(
+                data=UserDetailSerializer(result['user']).data,
+                message="User information retrieved successfully"
+            )
             
         except Exception as e:
-            return Response({
-                'error': 'Failed to get user information',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to get user information",
+                error_code="USER_INFO_ERROR"
+            )
     
     @action(detail=False, methods=['put', 'patch'])
     def update_profile(self, request):
@@ -177,10 +187,11 @@ class UserViewSet(viewsets.ModelViewSet):
             # Validate input data
             serializer = UserProfileUpdateSerializer(data=request.data, partial=True)
             if not serializer.is_valid():
-                return Response({
-                    'error': 'Profile data validation failed',
-                    'details': serializer.errors
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return ApiResponse.error(
+                    error_message="Profile data validation failed",
+                    error_code="VALIDATION_ERROR",
+                    data=serializer.errors
+                )
             
             # Use service layer for business logic
             result = UserProfileService.update_user_profile(
@@ -189,21 +200,23 @@ class UserViewSet(viewsets.ModelViewSet):
             )
             
             # Return updated user information
-            return Response({
-                'user': UserDetailSerializer(result['user']).data,
-                'message': result['message']
-            })
+            return ApiResponse.success(
+                data={
+                    'user': UserDetailSerializer(result['user']).data
+                },
+                message=result['message']
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Profile update failed',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="PROFILE_UPDATE_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Internal server error',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Profile update failed",
+                error_code="PROFILE_UPDATE_ERROR"
+            )
     
     @action(detail=False, methods=['post'])
     def change_password(self, request):
@@ -212,10 +225,11 @@ class UserViewSet(viewsets.ModelViewSet):
             # Validate input data
             serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
             if not serializer.is_valid():
-                return Response({
-                    'error': 'Password change validation failed',
-                    'details': serializer.errors
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return ApiResponse.error(
+                    error_message="Password change validation failed",
+                    error_code="VALIDATION_ERROR",
+                    data=serializer.errors
+                )
             
             # Use service layer for password change
             result = UserService.change_password(
@@ -224,20 +238,20 @@ class UserViewSet(viewsets.ModelViewSet):
                 serializer.validated_data['new_password']
             )
             
-            return Response({
-                'message': result['message']
-            })
+            return ApiResponse.success(
+                message=result['message']
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Password change failed',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="PASSWORD_CHANGE_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Password change failed',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Password change failed",
+                error_code="PASSWORD_CHANGE_ERROR"
+            )
     
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def toggle_active(self, request, pk=None):

@@ -3,7 +3,7 @@ User service layer for handling all user-related business logic.
 Separates business logic from views and serializers.
 """
 from django.db import transaction
-from django.contrib.auth.models import User
+from .models import User
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from django.db.models import Q
