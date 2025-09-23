@@ -22,7 +22,7 @@ class APILoggingMiddleware(MiddlewareMixin):
 
     def __init__(self, get_response: Callable | None = None) -> None:
         super().__init__(get_response)
-        self.logger = logging.getLogger("api.request")
+        self.logger = logging.getLogger(__name__)
         self.enabled: bool = getattr(settings, "API_LOG", True)
         self.log_body: bool = getattr(settings, "API_LOG_BODY", False)
         self.max_body_bytes: int = getattr(settings, "API_LOG_MAX_BODY", 2048)
@@ -90,7 +90,7 @@ class GlobalExceptionMiddleware(MiddlewareMixin):
 
     def __init__(self, get_response: Callable | None = None) -> None:
         super().__init__(get_response)
-        self.logger = logging.getLogger("api.errors")
+        self.logger = logging.getLogger(__name__)
 
     def process_exception(self, request: HttpRequest, exception: Exception):
         try:
@@ -190,7 +190,7 @@ class FinalizeRenderMiddleware(MiddlewareMixin):
     """
 
     def process_response(self, request: HttpRequest, response: HttpResponse) -> HttpResponse:
-        logger = logging.getLogger("api.request")
+        logger = logging.getLogger(__name__)
         
         # Log response details for debugging
         debug_info = {
