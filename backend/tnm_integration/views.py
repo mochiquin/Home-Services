@@ -3,7 +3,9 @@ from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 from django.conf import settings
+import os
 from .services import TnmService
+from projects.models import Project, ProjectMember
 from .models import TnmJob
 from .serializers import TnmJobCreateSerializer, TnmJobSerializer
 import boto3
@@ -11,7 +13,7 @@ import json
 
 
 @api_view(['POST'])
-@permission_classes([IsAdminUser])
+@permission_classes([IsAuthenticated])
 def run_tnm(request):
 	"""
 	Trigger TNM CLI to analyze a Git repository.
@@ -27,8 +29,48 @@ def run_tnm(request):
 	options = payload.get('options', [])
 	args = payload.get('args', [])
 
+	# Authorization and project lookup
+	project_id = payload.get('project_id')
+	# Resolve project: by id or user's selected_project
+	try:
+		if project_id:
+			project = Project.objects.get(id=project_id)
+		else:
+			project = getattr(request.user.profile, 'selected_project', None)
+			if not project:
+				return Response({'error': 'project_id is required (or set selected_project first)'}, status=status.HTTP_400_BAD_REQUEST)
+	except Project.DoesNotExist:
+		return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+	user_profile = request.user.profile
+	membership = project.members.filter(profile=user_profile).first()
+	if not (project.owner_profile == user_profile or (membership and membership.role in [ProjectMember.Role.OWNER, ProjectMember.Role.MAINTAINER])):
+		return Response({'error': 'Only project owner or maintainer can run TNM'}, status=status.HTTP_403_FORBIDDEN)
+
+	# Determine branch: prefer explicit payload, else use project's selected/default branch, else fallback
+	branch = payload.get('branch') or (project.default_branch or 'main')
+
+	# Convenience: allow passing project_id/branch and build options automatically
+	if project and not options:
+		# Decide path prefixes based on docker mode (tnm runs inside container)
+		docker_mode = os.getenv('TNM_DOCKER_MODE', 'false').lower() == 'true'
+		if docker_mode:
+			repos_root = '/data/repositories'
+			output_root = '/data/output'
+		else:
+			repos_root = getattr(settings, 'TNM_REPOSITORIES_DIR', os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories'))
+			output_root = getattr(settings, 'TNM_OUTPUT_DIR', os.path.join(settings.BASE_DIR, 'backend', 'tnm_output'))
+		repo_git_path = f"{repos_root}/project_{project.id}/.git"
+		options = [
+			'--repository', repo_git_path,
+			'--developer-knowledge', f"{output_root}/DeveloperKnowledge.json",
+			'--files-ownership', f"{output_root}/FilesOwnership.json",
+			'--potential-ownership', f"{output_root}/PotentialAuthorship.json",
+			branch,
+		]
+
 	if not command:
-		return Response({'error': 'command is required'}, status=status.HTTP_400_BAD_REQUEST)
+		# Default to FilesOwnershipMiner when only project_id is provided
+		command = 'FilesOwnershipMiner'
 
 	service = TnmService(
 		java_path=getattr(settings, 'TNM_JAVA_PATH', 'java'),
@@ -36,7 +78,13 @@ def run_tnm(request):
 		run_script=getattr(settings, 'TNM_RUN_SCRIPT', None),
 	)
 	try:
-		proc = service.run_cli(command, options, args, cwd=getattr(settings, 'TNM_WORK_DIR', None), timeout=getattr(settings, 'TNM_TIMEOUT', None))
+		proc = service.run_cli(
+			command,
+			options,
+			args,
+			cwd=getattr(settings, 'TNM_WORK_DIR', None),
+			timeout=getattr(settings, 'TNM_TIMEOUT', None)
+		)
 		return Response({
 			'command': proc.args,
 			'returncode': proc.returncode,

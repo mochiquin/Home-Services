@@ -1,4 +1,5 @@
 from django.db import models
+import uuid
 
 
 class Project(models.Model):
@@ -8,6 +9,7 @@ class Project(models.Model):
     is protected from deletion to keep ownership history intact.
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, db_index=True)
     repo_url = models.URLField(max_length=255, unique=True)
     default_branch = models.CharField(max_length=100, blank=True, null=True)
@@ -26,11 +28,10 @@ class ProjectMember(models.Model):
         OWNER = "owner", "Owner"
         MAINTAINER = "maintainer", "Maintainer"
         REVIEWER = "reviewer", "Reviewer"
-        MEMBER = "member", "Member"
 
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name="members")
     profile = models.ForeignKey("accounts.UserProfile", on_delete=models.CASCADE, related_name="project_memberships")
-    role = models.CharField(max_length=40, choices=Role.choices, default=Role.MEMBER)
+    role = models.CharField(max_length=40, choices=Role.choices, default=Role.REVIEWER)
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

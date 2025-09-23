@@ -321,6 +321,40 @@ class ProjectService:
             raise
         except Exception as e:
             raise ValidationError(f"Failed to remove member: {str(e)}")
+
+    @staticmethod
+    def remove_project_member_by_user_id(project, user_id, user_profile):
+        """
+        Remove a member from the project using the user's UUID.
+
+        Args:
+            project: Project instance
+            user_id: UUID of the user to remove
+            user_profile: UserProfile instance of the requester
+
+        Returns:
+            Dictionary with removal result
+        """
+        if not ProjectService.check_owner_permission(project, user_profile):
+            raise ValidationError("Only project owner can remove members")
+        try:
+            member = project.members.get(profile__user__id=user_id)
+
+            if member.role == ProjectMember.Role.OWNER:
+                raise ValidationError("Cannot remove project owner")
+
+            member_username = member.profile.user.username
+            member.delete()
+            return {
+                'success': True,
+                'message': f'User {member_username} removed from project successfully'
+            }
+        except ProjectMember.DoesNotExist:
+            raise ValidationError("Member not found")
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError(f"Failed to remove member: {str(e)}")
     
     @staticmethod
     def update_member_role(project, member_id, new_role, user_profile):
@@ -356,6 +390,41 @@ class ProjectService:
                 'message': f'Member role changed from {old_role} to {new_role}'
             }
             
+        except ProjectMember.DoesNotExist:
+            raise ValidationError("Member not found")
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError(f"Failed to update member role: {str(e)}")
+
+    @staticmethod
+    def update_member_role_by_user_id(project, user_id, new_role, user_profile):
+        """
+        Update a member's role using the user's UUID.
+
+        Args:
+            project: Project instance
+            user_id: UUID of the user whose role to update
+            new_role: New role to assign
+            user_profile: UserProfile instance of the requester
+
+        Returns:
+            Dictionary with update result
+        """
+        if not ProjectService.check_owner_permission(project, user_profile):
+            raise ValidationError("Only project owner can update member roles")
+        try:
+            member = project.members.get(profile__user__id=user_id)
+            if member.role == ProjectMember.Role.OWNER:
+                raise ValidationError("Cannot change project owner role")
+            old_role = member.role
+            member.role = new_role
+            member.save()
+            return {
+                'member': member,
+                'success': True,
+                'message': f'Member role changed from {old_role} to {new_role}'
+            }
         except ProjectMember.DoesNotExist:
             raise ValidationError("Member not found")
         except ValidationError:

@@ -86,6 +86,10 @@ Secuflow_API_Collection.json
 backend/tnm_output/
 backend/tnm_repositories/
 
+# Binary artifacts
+backend/tnm-cli.jar
+/ssrn-4640248.pdf
+
 # Misc
 *.swp
 *.swo

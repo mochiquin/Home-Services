@@ -99,6 +99,9 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Custom user model
+AUTH_USER_MODEL = 'accounts.User'
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -136,12 +139,12 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True
 ALLOWED_HOSTS = ['*']
 
-# TNM integration defaults
-TNM_JAVA_PATH = 'java'
-TNM_JAR_PATH = None
-TNM_RUN_SCRIPT = None
-TNM_WORK_DIR = None
-TNM_TIMEOUT = 1800
+# TNM integration defaults (read from environment when provided)
+TNM_JAVA_PATH = os.getenv('TNM_JAVA_PATH', 'java')
+TNM_JAR_PATH = os.getenv('TNM_JAR_PATH', None)
+TNM_RUN_SCRIPT = os.getenv('TNM_RUN_SCRIPT', None)
+TNM_WORK_DIR = os.getenv('TNM_WORK_DIR', None)
+TNM_TIMEOUT = int(os.getenv('TNM_TIMEOUT', '1800'))
 TNM_SQS_QUEUE_URL = None
 TNM_S3_BUCKET = None
 AWS_REGION = None

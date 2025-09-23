@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.contrib.auth.models import User
+from .models import User
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import UserProfile
 
@@ -54,8 +54,7 @@ class UserAdmin(BaseUserAdmin):
     get_display_name.short_description = 'Display Name'
     get_display_name.admin_order_field = 'profile__display_name'
 
-# Unregister the default User admin and register our custom one
-admin.site.unregister(User)
+# Register our custom User admin
 admin.site.register(User, UserAdmin)
 
 @admin.register(UserProfile)

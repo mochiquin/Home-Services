@@ -37,7 +37,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.db.models import Count, Q
-from django.contrib.auth.models import User
+from accounts.models import User
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError
 
@@ -69,6 +69,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     serializer_class = ProjectSerializer
     pagination_class = ProjectPagination
     permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'uid'
     
     def get_serializer_class(self):
         """Return appropriate serializer based on action."""
@@ -220,7 +221,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             user_profile = request.user.profile
             
             username = request.data.get('username')
-            role = request.data.get('role', ProjectMember.Role.MEMBER)
+            role = request.data.get('role', ProjectMember.Role.REVIEWER)
             
             if not username:
                 return Response({
@@ -244,60 +245,39 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 'details': 'An unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-    @action(detail=True, methods=['delete'], url_path='members/(?P<member_id>[^/.]+)')
-    def remove_member(self, request, pk=None, member_id=None):
-        """Remove a member from the project using service layer."""
-        try:
-            project = self.get_object()
-            user_profile = request.user.profile
-            
-            # Use service layer to remove member
-            result = ProjectService.remove_project_member(project, member_id, user_profile)
-            
-            return Response({
-                'message': result['message']
-            }, status=status.HTTP_200_OK)
-            
-        except ValidationError as e:
-            return Response({
-                'error': 'Failed to remove member',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({
-                'error': 'Failed to remove member',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-    @action(detail=True, methods=['patch'], url_path='members/(?P<member_id>[^/.]+)')
-    def update_member_role(self, request, pk=None, member_id=None):
-        """Update a member's role in the project using service layer."""
+    
+    @action(detail=True, methods=['delete'], url_path='members/by-user/(?P<user_id>[^/.]+)')
+    def remove_member_by_user(self, request, pk=None, user_id=None):
+        """Remove a member by user UUID using service layer."""
         try:
             project = self.get_object()
             user_profile = request.user.profile
-            
+            result = ProjectService.remove_project_member_by_user_id(project, user_id, user_profile)
+            return Response({'message': result['message']}, status=status.HTTP_200_OK)
+        except ValidationError as e:
+            return Response({'error': 'Failed to remove member', 'details': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({'error': 'Failed to remove member', 'details': 'An unexpected error occurred'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    
+
+    @action(detail=True, methods=['patch'], url_path='members/by-user/(?P<user_id>[^/.]+)')
+    def update_member_role_by_user(self, request, pk=None, user_id=None):
+        """Update a member's role by user UUID using service layer."""
+        try:
+            project = self.get_object()
+            user_profile = request.user.profile
             new_role = request.data.get('role')
             if not new_role:
-                return Response({
-                    'error': 'Role is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Use service layer to update member role
-            result = ProjectService.update_member_role(project, member_id, new_role, user_profile)
-            
+                return Response({'error': 'Role is required'}, status=status.HTTP_400_BAD_REQUEST)
+            result = ProjectService.update_member_role_by_user_id(project, user_id, new_role, user_profile)
             serializer = ProjectMemberSerializer(result['member'])
             return Response(serializer.data)
-            
         except ValidationError as e:
-            return Response({
-                'error': 'Failed to update member role',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({
-                'error': 'Failed to update member role',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': 'Failed to update member role', 'details': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({'error': 'Failed to update member role', 'details': 'An unexpected error occurred'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=False, methods=['get'])
     def my_projects(self, request):
@@ -344,6 +324,62 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 'error': 'Failed to get joined projects',
                 'details': 'An unexpected error occurred'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'])
+    def selectable_projects(self, request):
+        """Get projects that user can select for TNM analysis (owned or maintainer role)."""
+        try:
+            user_profile = request.user.profile
+            
+            # Get projects where user is owner or maintainer (can run TNM)
+            user_projects = Project.objects.filter(
+                Q(owner_profile=user_profile) | 
+                Q(members__profile=user_profile, members__role__in=[ProjectMember.Role.OWNER, ProjectMember.Role.MAINTAINER])
+            ).distinct().order_by('-created_at')
+            
+            # Filter projects that have repositories
+            projects_with_repos = user_projects.filter(repo_url__isnull=False).exclude(repo_url='')
+            
+            page = self.paginate_queryset(projects_with_repos)
+            if page is not None:
+                serializer = ProjectListSerializer(page, many=True)
+                return self.get_paginated_response(serializer.data)
+            
+            serializer = ProjectListSerializer(projects_with_repos, many=True)
+            return Response({
+                'projects': serializer.data,
+                'count': projects_with_repos.count(),
+                'message': 'Projects available for TNM analysis'
+            })
+            
+        except Exception as e:
+            return Response({
+                'error': 'Failed to get selectable projects',
+                'details': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'])
+    def select_project(self, request):
+        """Persist user's selected project for quick TNM operations.
+        Body: { "project_uid": "<uuid>" }
+        """
+        try:
+            user_profile = request.user.profile
+            project_uid = request.data.get('project_uid')
+            if not project_uid:
+                return Response({'error': 'project_uid is required'}, status=status.HTTP_400_BAD_REQUEST)
+            project = Project.objects.filter(uid=project_uid).first()
+            if not project:
+                return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+            # Only owner or maintainer can select for TNM
+            membership = project.members.filter(profile=user_profile).first()
+            if not (project.owner_profile == user_profile or (membership and membership.role in [ProjectMember.Role.OWNER, ProjectMember.Role.MAINTAINER])):
+                return Response({'error': 'Only project owner or maintainer can select this project'}, status=status.HTTP_403_FORBIDDEN)
+            user_profile.selected_project = project
+            user_profile.save(update_fields=['selected_project'])
+            return Response({'message': 'Selected project updated', 'project_uid': str(project.uid), 'project_name': project.name})
+        except Exception:
+            return Response({'error': 'Failed to select project'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=False, methods=['get'])
     def stats(self, request):

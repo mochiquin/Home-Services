@@ -1,5 +1,16 @@
 from django.db import models
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AbstractUser
+from django.conf import settings
+import uuid
+
+
+class User(AbstractUser):
+    """Custom user model with UUID primary key."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    class Meta:
+        db_table = 'auth_user'
+
 
 class UserProfile(models.Model):
     """Extended profile data for Django's built-in User.
@@ -7,7 +18,7 @@ class UserProfile(models.Model):
     Stores additional attributes such as avatar and display name.
     """
     user = models.OneToOneField(
-        User, 
+        'accounts.User', 
         on_delete=models.CASCADE, 
         related_name='profile',
         verbose_name="User"
@@ -37,6 +48,9 @@ class UserProfile(models.Model):
     updated_at = models.DateTimeField(
         auto_now=True, 
         verbose_name="Updated At"
+    )
+    selected_project = models.ForeignKey(
+        'projects.Project', on_delete=models.SET_NULL, null=True, blank=True, related_name='selected_by_profiles'
     )
 
     def __str__(self):

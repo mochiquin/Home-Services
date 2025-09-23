@@ -94,6 +94,10 @@ docker-compose exec tnm java -jar /app/tnm-cli.jar FilesOwnershipMiner \
 
 **Output location**: `backend/tnm_output/`
 
+## 🔑 ID format in APIs
+- Resource IDs (e.g., users, projects) are UUID strings.
+- Path placeholders `{id}` in endpoints expect UUIDs, e.g. `/api/projects/projects/{id}/`.
+
 ## 🚨 Troubleshooting
 
 ### Common Issues
@@ -215,3 +219,18 @@ docker-compose exec backend python manage.py migrate
 ---
 
 **Happy Coding! 🎉**
+
+## 📦 Version Control Notes (.gitignore update)
+
+- Added ignore entries for:
+  - `backend/tnm-cli.jar`
+  - `ssrn-4640248.pdf`
+
+If these files are already tracked, untrack them without deleting local copies:
+
+```bash
+git rm --cached backend/tnm-cli.jar
+git rm --cached ssrn-4640248.pdf
+git add .gitignore
+git commit -m "chore: ignore tnm-cli.jar and ssrn-4640248.pdf"
+```

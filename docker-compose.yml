@@ -56,9 +56,10 @@ services:
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       # TNM Docker Configuration
       - TNM_CONTAINER_NAME=secuflow-tnm
-      - TNM_DOCKER_MODE=true
+      - TNM_DOCKER_MODE=false
       - TNM_OUTPUT_DIR=/app/tnm_output
       - TNM_REPOSITORIES_DIR=/app/tnm_repositories
+      - TNM_JAR_PATH=/app/tnm-cli.jar
       - TNM_TIMEOUT=1800
     ports:
       - "8000:8000"
@@ -68,6 +69,8 @@ services:
       # TNM Data Sharing
       - ./backend/tnm_output:/app/tnm_output
       - ./backend/tnm_repositories:/app/tnm_repositories
+      # Mount TNM CLI jar for direct execution (no docker inside backend)
+      - ./tnm/cli/build/libs/shadow-all.jar:/app/tnm-cli.jar:ro
       # SSH key for private repos (optional)
       - ${SSH_PRIVATE_KEY:-./.ssh/id_ed25519}:/home/django/.ssh/id_rsa:ro
     networks:

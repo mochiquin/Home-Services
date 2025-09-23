@@ -46,7 +46,6 @@ class ProjectSerializer(serializers.ModelSerializer):
     owner_username = serializers.CharField(source='owner_profile.user.username', read_only=True)
     owner_email = serializers.EmailField(source='owner_profile.user.email', read_only=True)
     members_count = serializers.SerializerMethodField()
-    
     class Meta:
         model = Project
         fields = [
@@ -80,7 +79,6 @@ class ProjectListSerializer(serializers.ModelSerializer):
     
     owner_username = serializers.CharField(source='owner_profile.user.username', read_only=True)
     members_count = serializers.SerializerMethodField()
-    
     class Meta:
         model = Project
         fields = [
@@ -141,7 +139,7 @@ class ProjectMemberCreateSerializer(serializers.ModelSerializer):
     def validate_username(self, value):
         """Validate that the username exists."""
         try:
-            from django.contrib.auth.models import User
+            from accounts.models import User
             user = User.objects.get(username=value)
             return value
         except User.DoesNotExist:
@@ -157,7 +155,7 @@ class ProjectMemberCreateSerializer(serializers.ModelSerializer):
         
         # Use service layer to add member (we need a user_profile for permission check)
         # This will be handled in the view where we have access to request.user
-        from django.contrib.auth.models import User
+        from accounts.models import User
         user = User.objects.get(username=username)
         profile = user.profile
         
