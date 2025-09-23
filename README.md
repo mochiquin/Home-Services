@@ -53,12 +53,37 @@ pnpm dev
 
 ```
 Secuflow_Rebuild/
-├── docker-compose.yml      # Docker services
-├── backend/                # Django API
-│   ├── tnm_output/         # Analysis results
-│   └── tnm_repositories/   # Git repos
-├── frontend/               # Next.js app
-└── tnm/                    # Analysis tool
+├── 📄 docker-compose.yml        # Docker orchestration
+├── 📄 docker.env                # Environment variables
+├── 📄 .env                      # Runtime configuration
+├── 📂 backend/                  # Django REST API
+│   ├── 🐳 Dockerfile
+│   ├── ⚙️ manage.py
+│   ├── 📦 requirements.txt
+│   ├── 📂 accounts/             # User management APIs
+│   ├── 📂 projects/             # Project management APIs
+│   ├── 📂 contributors/         # Contributor analysis APIs
+│   ├── 📂 coordination/         # Coordination analysis APIs
+│   ├── 📂 risks/               # Risk assessment APIs
+│   ├── 📂 tnm_integration/     # TNM tool integration
+│   ├── 📂 common/              # Shared utilities & middleware
+│   ├── 📂 api/                 # Main API routing
+│   ├── 📂 secuflow/            # Django settings
+│   ├── 📂 tnm_output/          # TNM analysis results
+│   ├── 📂 tnm_repositories/    # Git repository workspace
+│   └── ⚙️ tnm_config.json      # TNM configuration
+├── 📂 frontend/                 # Next.js application
+│   ├── 🐳 Dockerfile
+│   ├── 📦 package.json
+│   ├── ⚙️ next.config.ts
+│   └── 📂 app/                 # App pages & components
+├── 📂 tnm/                     # TNM analysis tool (submodule)
+│   ├── 🐳 Dockerfile
+│   ├── ⚙️ build.gradle.kts
+│   ├── 🔧 gradlew
+│   └── 📂 cli/                 # Command line interface
+├── 📄 Postman_Environment.json # API testing environment
+└── 📄 Secuflow_API_Collection.json # API test collection
 ```
 
 ## 🛠️ Services
@@ -220,17 +245,45 @@ docker-compose exec backend python manage.py migrate
 
 **Happy Coding! 🎉**
 
-## 📦 Version Control Notes (.gitignore update)
+## 🔧 API Documentation
 
-- Added ignore entries for:
-  - `backend/tnm-cli.jar`
-  - `ssrn-4640248.pdf`
+The project includes comprehensive API documentation through Postman:
 
-If these files are already tracked, untrack them without deleting local copies:
+- **Environment File**: `Postman_Environment.json` - Contains all necessary variables
+- **Collection File**: `Secuflow_API_Collection.json` - Complete API test suite
 
-```bash
-git rm --cached backend/tnm-cli.jar
-git rm --cached ssrn-4640248.pdf
-git add .gitignore
-git commit -m "chore: ignore tnm-cli.jar and ssrn-4640248.pdf"
-```
+### API Modules
+
+| Module | Description | Endpoints |
+|--------|-------------|-----------|
+| **Authentication** | User login, registration, profile | `/api/auth/` |
+| **User Management** | User CRUD operations | `/api/users/` |
+| **Project Management** | Project lifecycle management | `/api/projects/` |
+| **Contributors Analysis** | Developer contribution analysis | `/api/contributors/` |
+| **Coordination Analysis** | Team coordination metrics | `/api/coordination/` |
+| **Risk Assessment** | Security and code quality analysis | `/api/risks/` |
+| **TNM Integration** | Code analysis tool integration | `/api/tnm/` |
+
+### Middleware Features
+
+- **Request/Response Logging**: Comprehensive API request tracking
+- **Global Exception Handling**: Unified error response format
+- **API Response Envelope**: Consistent response structure across all endpoints
+- **Content Rendering**: Automatic DRF response processing
+
+## 📦 Version Control & Cleanup
+
+### Cleaned Files
+- ✅ Removed empty `backend/backend/` directory
+- ✅ Deleted empty log files and `logs/` directory (using console logging)
+- ✅ Removed empty `backend/tnm-cli.jar` file
+- ✅ Cleaned all `__pycache__/` directories
+
+### Gitignore Coverage
+- Virtual environments (`venv/`, `.venv/`)
+- Python cache files (`__pycache__/`, `*.pyc`)
+- Log files (`*.log`, `logs/`)
+- Environment files (`.env*`)
+- TNM output directories (`tnm_output/`, `tnm_repositories/`)
+- Binary artifacts (`tnm-cli.jar`)
+- Development tools cache
