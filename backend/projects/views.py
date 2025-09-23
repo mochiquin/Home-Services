@@ -32,6 +32,7 @@ Role Hierarchy:
 4. member: Basic access to project resources
 """
 
+import logging
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -49,6 +50,9 @@ from .serializers import (
 from .services import ProjectService
 from accounts.models import UserProfile
 from common.response import ApiResponse
+
+# Initialize logger for projects API
+logger = logging.getLogger(__name__)
 
 
 class ProjectPagination(PageNumberPagination):
@@ -70,7 +74,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     serializer_class = ProjectSerializer
     pagination_class = ProjectPagination
     permission_classes = [permissions.IsAuthenticated]
-    lookup_field = 'uid'
+    lookup_field = 'id'
     
     def get_serializer_class(self):
         """Return appropriate serializer based on action."""
@@ -93,11 +97,25 @@ class ProjectViewSet(viewsets.ModelViewSet):
     
     def create(self, request, *args, **kwargs):
         """Create a new project using service layer."""
+        user_id = request.user.id if request.user else None
+        project_name = request.data.get('name', '')
+        
+        logger.info("Creating new project", extra={
+            'user_id': user_id,
+            'project_name': project_name
+        })
+        
         try:
             user_profile = request.user.profile
             
             # Use service layer to create project
             result = ProjectService.create_project(request.data, user_profile)
+            
+            logger.info("Project created successfully", extra={
+                'user_id': user_id,
+                'project_name': project_name,
+                'project_id': result['project'].id
+            })
             
             serializer = self.get_serializer(result['project'])
             return ApiResponse.created(
@@ -106,11 +124,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
             )
             
         except ValidationError as e:
+            logger.warning("Project creation failed - validation error", extra={
+                'user_id': user_id,
+                'project_name': project_name,
+                'error': str(e)
+            })
             return ApiResponse.error(
                 error_message=str(e),
                 error_code="PROJECT_CREATION_ERROR"
             )
         except Exception as e:
+            logger.error("Project creation failed - system error", extra={
+                'user_id': user_id,
+                'project_name': project_name,
+                'error': str(e)
+            }, exc_info=True)
             return ApiResponse.internal_error(
                 error_message="Project creation failed",
                 error_code="PROJECT_CREATION_ERROR"
@@ -200,7 +228,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             )
     
     @action(detail=True, methods=['get'])
-    def members(self, request, pk=None):
+    def members(self, request, id=None):
         """Get all members of a project using service layer."""
         try:
             project = self.get_object()
@@ -227,23 +255,29 @@ class ProjectViewSet(viewsets.ModelViewSet):
             )
     
     @action(detail=True, methods=['post'])
-    def add_member(self, request, pk=None):
+    def add_member(self, request, id=None):
         """Add a new member to the project using service layer."""
         try:
             project = self.get_object()
             user_profile = request.user.profile
             
-            username = request.data.get('username')
-            role = request.data.get('role', ProjectMember.Role.REVIEWER)
+            user_id = request.data.get('user_id')
+            role_id = request.data.get('role_id', 3)  # Default to reviewer (ID: 3)
             
-            if not username:
+            if not user_id:
                 return ApiResponse.error(
-                    error_message="Username is required",
-                    error_code="MISSING_USERNAME"
+                    error_message="user_id is required",
+                    error_code="MISSING_USER_ID"
+                )
+            
+            if not role_id:
+                return ApiResponse.error(
+                    error_message="role_id is required",
+                    error_code="MISSING_ROLE_ID"
                 )
             
             # Use service layer to add member
-            result = ProjectService.add_project_member(project, username, role, user_profile)
+            result = ProjectService.add_project_member_by_user_id(project, user_id, role_id, user_profile)
             
             serializer = ProjectMemberSerializer(result['member'])
             return ApiResponse.created(
@@ -265,7 +299,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     
     
     @action(detail=True, methods=['delete'], url_path='members/by-user/(?P<user_id>[^/.]+)')
-    def remove_member_by_user(self, request, pk=None, user_id=None):
+    def remove_member_by_user(self, request, id=None, user_id=None):
         """Remove a member by user UUID using service layer."""
         try:
             project = self.get_object()
@@ -288,7 +322,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
     
 
     @action(detail=True, methods=['patch'], url_path='members/by-user/(?P<user_id>[^/.]+)')
-    def update_member_role_by_user(self, request, pk=None, user_id=None):
+    def update_member_role_by_user(self, request, id=None, user_id=None):
         """Update a member's role by user UUID using service layer."""
         try:
             project = self.get_object()
@@ -319,25 +353,47 @@ class ProjectViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def my_projects(self, request):
         """Get projects owned by the current user using service layer."""
+        user_id = request.user.id if request.user else None
+        
+        logger.info("User owned projects request", extra={
+            'user_id': user_id
+        })
+        
         try:
             user_profile = request.user.profile
             
             # Use service layer to get owned projects
             owned_projects = ProjectService.get_owned_projects(user_profile)
             
+            logger.debug("User owned projects retrieved successfully", extra={
+                'user_id': user_id,
+                'projects_count': owned_projects.count()
+            })
+            
             page = self.paginate_queryset(owned_projects)
             if page is not None:
                 serializer = ProjectListSerializer(page, many=True)
-                return self.get_paginated_response(serializer.data)
+                # Build paginated response manually using ApiResponse to avoid rendering issues
+                paginator = self.paginator
+                return ApiResponse.success(data={
+                    'results': serializer.data,
+                    'count': paginator.page.paginator.count,
+                    'next': paginator.get_next_link(),
+                    'previous': paginator.get_previous_link()
+                })
             
             serializer = ProjectListSerializer(owned_projects, many=True)
-            return Response(serializer.data)
+            return ApiResponse.success(data=serializer.data)
             
         except Exception as e:
-            return Response({
-                'error': 'Failed to get owned projects',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error("Failed to retrieve user owned projects", extra={
+                'user_id': user_id,
+                'error': str(e)
+            }, exc_info=True)
+            return ApiResponse.internal_error(
+                error_message="Failed to get owned projects",
+                error_code="MY_PROJECTS_ERROR"
+            )
     
     @action(detail=False, methods=['get'])
     def joined_projects(self, request):
@@ -351,16 +407,23 @@ class ProjectViewSet(viewsets.ModelViewSet):
             page = self.paginate_queryset(joined_projects)
             if page is not None:
                 serializer = ProjectListSerializer(page, many=True)
-                return self.get_paginated_response(serializer.data)
+                # Build paginated response manually using ApiResponse to avoid rendering issues
+                paginator = self.paginator
+                return ApiResponse.success(data={
+                    'results': serializer.data,
+                    'count': paginator.page.paginator.count,
+                    'next': paginator.get_next_link(),
+                    'previous': paginator.get_previous_link()
+                })
             
             serializer = ProjectListSerializer(joined_projects, many=True)
-            return Response(serializer.data)
+            return ApiResponse.success(data=serializer.data)
             
         except Exception as e:
-            return Response({
-                'error': 'Failed to get joined projects',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to get joined projects",
+                error_code="JOINED_PROJECTS_ERROR"
+            )
     
     @action(detail=False, methods=['get'])
     def selectable_projects(self, request):
@@ -380,20 +443,29 @@ class ProjectViewSet(viewsets.ModelViewSet):
             page = self.paginate_queryset(projects_with_repos)
             if page is not None:
                 serializer = ProjectListSerializer(page, many=True)
-                return self.get_paginated_response(serializer.data)
+                # Build paginated response manually using ApiResponse to avoid rendering issues
+                paginator = self.paginator
+                return ApiResponse.success(data={
+                    'results': serializer.data,
+                    'count': paginator.page.paginator.count,
+                    'next': paginator.get_next_link(),
+                    'previous': paginator.get_previous_link()
+                })
             
             serializer = ProjectListSerializer(projects_with_repos, many=True)
-            return Response({
-                'projects': serializer.data,
-                'count': projects_with_repos.count(),
-                'message': 'Projects available for TNM analysis'
-            })
+            return ApiResponse.success(
+                data={
+                    'projects': serializer.data,
+                    'count': projects_with_repos.count()
+                },
+                message='Projects available for TNM analysis'
+            )
             
         except Exception as e:
-            return Response({
-                'error': 'Failed to get selectable projects',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to get selectable projects",
+                error_code="SELECTABLE_PROJECTS_ERROR"
+            )
 
     @action(detail=False, methods=['post'])
     def select_project(self, request):
@@ -404,19 +476,35 @@ class ProjectViewSet(viewsets.ModelViewSet):
             user_profile = request.user.profile
             project_uid = request.data.get('project_uid')
             if not project_uid:
-                return Response({'error': 'project_uid is required'}, status=status.HTTP_400_BAD_REQUEST)
-            project = Project.objects.filter(uid=project_uid).first()
+                return ApiResponse.error('project_uid is required', error_code='MISSING_PROJECT_UID', status_code=status.HTTP_400_BAD_REQUEST)
+            project = Project.objects.filter(id=project_uid).first()
             if not project:
-                return Response({'error': 'Project not found'}, status=status.HTTP_404_NOT_FOUND)
+                return ApiResponse.not_found('Project not found')
             # Only owner or maintainer can select for TNM
             membership = project.members.filter(profile=user_profile).first()
             if not (project.owner_profile == user_profile or (membership and membership.role in [ProjectMember.Role.OWNER, ProjectMember.Role.MAINTAINER])):
-                return Response({'error': 'Only project owner or maintainer can select this project'}, status=status.HTTP_403_FORBIDDEN)
+                return ApiResponse.forbidden('Only project owner or maintainer can select this project')
             user_profile.selected_project = project
             user_profile.save(update_fields=['selected_project'])
-            return Response({'message': 'Selected project updated', 'project_uid': str(project.uid), 'project_name': project.name})
+            return ApiResponse.success(data={'project_uid': str(project.id), 'project_name': project.name}, message='Selected project updated')
         except Exception:
-            return Response({'error': 'Failed to select project'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error('Failed to select project', error_code='SELECT_PROJECT_ERROR')
+    
+    @action(detail=False, methods=['get'])
+    def roles(self, request):
+        """Get all available project roles."""
+        try:
+            from .models import ProjectRole
+            roles = ProjectRole.get_all_roles()
+            return ApiResponse.success(
+                data=roles,
+                message="Project roles retrieved successfully"
+            )
+        except Exception as e:
+            return ApiResponse.internal_error(
+                error_message="Failed to get project roles",
+                error_code="ROLES_RETRIEVAL_ERROR"
+            )
     
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -428,21 +516,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
             result = ProjectService.get_project_stats(user_profile)
             
             serializer = ProjectStatsSerializer(result)
-            return Response(serializer.data)
+            return ApiResponse.success(data=serializer.data)
             
         except ValidationError as e:
-            return Response({
-                'error': 'Failed to get project statistics',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="PROJECT_STATS_ERROR",
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
-            return Response({
-                'error': 'Failed to get project statistics',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message="Failed to get project statistics",
+                error_code="PROJECT_STATS_ERROR"
+            )
     
     @action(detail=True, methods=['patch'])
-    def update_branch(self, request, pk=None):
+    def update_branch(self, request, id=None):
         """Update project's default branch using service layer."""
         try:
             project = self.get_object()
@@ -450,39 +539,32 @@ class ProjectViewSet(viewsets.ModelViewSet):
             
             new_branch = request.data.get('branch')
             if not new_branch:
-                return Response({
-                    'error': 'Branch name is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return ApiResponse.error('Branch name is required', error_code='MISSING_BRANCH', status_code=status.HTTP_400_BAD_REQUEST)
             
             # Use service layer to update branch
             result = ProjectService.update_project_branch(project, new_branch, user_profile)
             
             serializer = self.get_serializer(result['project'])
-            return Response({
-                'project': serializer.data,
-                'message': result['message']
-            })
+            return ApiResponse.success(data={'project': serializer.data}, message=result['message'])
             
         except ValidationError as e:
             error_message = str(e)
             if "permission" in error_message.lower() or "owner" in error_message.lower() or "maintainer" in error_message.lower():
-                return Response({
-                    'error': 'Permission denied',
-                    'details': str(e)
-                }, status=status.HTTP_403_FORBIDDEN)
+                return ApiResponse.forbidden(error_message='Permission denied', error_code='PERMISSION_DENIED')
             else:
-                return Response({
-                    'error': 'Failed to update branch',
-                    'details': str(e)
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return ApiResponse.error(
+                    error_message=str(e),
+                    error_code='UPDATE_BRANCH_ERROR',
+                    status_code=status.HTTP_400_BAD_REQUEST
+                )
         except Exception as e:
-            return Response({
-                'error': 'Failed to update branch',
-                'details': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message=str(e),
+                error_code='UPDATE_BRANCH_ERROR'
+            )
     
     @action(detail=True, methods=['get'])
-    def branches(self, request, pk=None):
+    def branches(self, request, id=None):
         """Get all branches for a project's repository using service layer."""
         try:
             project = self.get_object()
@@ -490,32 +572,40 @@ class ProjectViewSet(viewsets.ModelViewSet):
             
             # Check if user has access to the project
             if not ProjectService.check_project_access(project, user_profile):
-                return Response({
-                    'error': 'You do not have permission to view this project'
-                }, status=status.HTTP_403_FORBIDDEN)
+                return ApiResponse.forbidden(
+                    error_message="You do not have permission to view this project",
+                    error_code="ACCESS_DENIED"
+                )
             
             # Use service layer to get branches
             result = ProjectService.get_project_branches(project)
             
-            return Response({
-                'branches': result['branches'],
-                'current_branch': result['current_branch'],
-                'repository_path': result['repository_path']
-            })
+            return ApiResponse.success(
+                data={
+                    'branches': result['branches'],
+                    'current_branch': result['current_branch'],
+                    'repository_path': result['repository_path']
+                },
+                message="Project branches retrieved successfully"
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Failed to get branches',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="BRANCHES_RETRIEVAL_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Failed to get branches',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error in branches: {str(e)}")
+            print(f"Traceback: {error_details}")
+            return ApiResponse.internal_error(
+                error_message="Failed to get branches",
+                error_code="BRANCHES_RETRIEVAL_ERROR"
+            )
     
     @action(detail=True, methods=['post'])
-    def switch_branch(self, request, pk=None):
+    def switch_branch(self, request, id=None):
         """Switch to a different branch in the project's repository using service layer."""
         try:
             project = self.get_object()
@@ -525,36 +615,61 @@ class ProjectViewSet(viewsets.ModelViewSet):
             user_membership = project.members.filter(profile=user_profile).first()
             if not (project.owner_profile == user_profile or 
                     (user_membership and user_membership.role in [ProjectMember.Role.OWNER, ProjectMember.Role.MAINTAINER])):
-                return Response({
-                    'error': 'Only project owner or maintainer can switch branches'
-                }, status=status.HTTP_403_FORBIDDEN)
+                return ApiResponse.forbidden(
+                    error_message="Only project owner or maintainer can switch branches",
+                    error_code="ACCESS_DENIED"
+                )
             
-            branch_name = request.data.get('branch')
-            if not branch_name:
-                return Response({
-                    'error': 'Branch name is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            branch_id = request.data.get('branch_id')
+            
+            if not branch_id:
+                return ApiResponse.error(
+                    error_message="branch_id is required",
+                    error_code="MISSING_BRANCH_ID"
+                )
+            
+            # Get all branches to find the one with matching branch_id
+            branches_result = ProjectService.get_project_branches(project)
+            target_branch = None
+            for branch in branches_result['branches']:
+                if branch['branch_id'] == branch_id:
+                    target_branch = branch
+                    break
+            
+            if not target_branch:
+                return ApiResponse.error(
+                    error_message=f"Branch with ID {branch_id} not found",
+                    error_code="BRANCH_NOT_FOUND"
+                )
+            
+            branch_name = target_branch['name']
             
             # Use service layer to switch branch
             result = ProjectService.switch_project_branch(project, branch_name)
             
             serializer = self.get_serializer(result['project'])
-            return Response({
-                'project': serializer.data,
-                'message': result['message'],
-                'current_branch': result['current_branch']
-            })
+            return ApiResponse.success(
+                data={
+                    'project': serializer.data,
+                    'current_branch': result['current_branch']
+                },
+                message=result['message']
+            )
             
         except ValidationError as e:
-            return Response({
-                'error': 'Failed to switch branch',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code="BRANCH_SWITCH_ERROR"
+            )
         except Exception as e:
-            return Response({
-                'error': 'Failed to switch branch',
-                'details': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error in switch_branch: {str(e)}")
+            print(f"Traceback: {error_details}")
+            return ApiResponse.internal_error(
+                error_message="Failed to switch branch",
+                error_code="BRANCH_SWITCH_ERROR"
+            )
     
     @action(detail=False, methods=['post'])
     def validate_repository(self, request):
@@ -564,33 +679,33 @@ class ProjectViewSet(viewsets.ModelViewSet):
             repo_url = request.data.get('repo_url')
             
             if not repo_url:
-                return Response({
-                    'error': 'Repository URL is required'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return ApiResponse.error('Repository URL is required', error_code='MISSING_REPO_URL', status_code=status.HTTP_400_BAD_REQUEST)
             
             # Use service layer to validate repository
             result = ProjectService.validate_and_clone_repository(repo_url, user_profile)
             
-            return Response({
-                'valid': True,
-                'branches': result['branches'],
-                'default_branch': result['default_branch'],
-                'repo_url': result['repo_url'],
-                'message': result['message']
-            })
+            return ApiResponse.success(
+                data={
+                    'valid': True,
+                    'branches': result['branches'],
+                    'default_branch': result['default_branch'],
+                    'repo_url': result['repo_url']
+                },
+                message=result['message']
+            )
             
         except ValidationError as e:
-            return Response({
-                'valid': False,
-                'error': 'Repository validation failed',
-                'details': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return ApiResponse.error(
+                error_message=str(e),
+                error_code='REPO_VALIDATION_ERROR',
+                status_code=status.HTTP_400_BAD_REQUEST,
+                data={'valid': False}
+            )
         except Exception as e:
-            return Response({
-                'valid': False,
-                'error': 'Repository validation failed',
-                'details': 'An unexpected error occurred'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return ApiResponse.internal_error(
+                error_message='Repository validation failed',
+                error_code='REPO_VALIDATION_ERROR'
+            )
 
 
 class ProjectMemberViewSet(viewsets.ModelViewSet):

@@ -43,6 +43,7 @@ class ProjectCreateSerializer(serializers.ModelSerializer):
 class ProjectSerializer(serializers.ModelSerializer):
     """Serializer for Project model with owner information."""
     
+    owner_id = serializers.UUIDField(source='owner_profile.user.id', read_only=True)
     owner_username = serializers.CharField(source='owner_profile.user.username', read_only=True)
     owner_email = serializers.EmailField(source='owner_profile.user.email', read_only=True)
     members_count = serializers.SerializerMethodField()
@@ -50,7 +51,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         model = Project
         fields = [
             'id', 'name', 'repo_url', 'default_branch', 
-            'owner_profile', 'owner_username', 'owner_email',
+            'owner_profile', 'owner_id', 'owner_username', 'owner_email',
             'members_count', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -77,13 +78,14 @@ class ProjectSerializer(serializers.ModelSerializer):
 class ProjectListSerializer(serializers.ModelSerializer):
     """Simplified serializer for project list views."""
     
+    owner_id = serializers.UUIDField(source='owner_profile.user.id', read_only=True)
     owner_username = serializers.CharField(source='owner_profile.user.username', read_only=True)
     members_count = serializers.SerializerMethodField()
     class Meta:
         model = Project
         fields = [
             'id', 'name', 'repo_url', 'default_branch',
-            'owner_username', 'members_count', 'created_at'
+            'owner_id', 'owner_username', 'members_count', 'created_at'
         ]
     
     def get_members_count(self, obj):

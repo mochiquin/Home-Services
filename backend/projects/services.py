@@ -6,11 +6,13 @@ import os
 from django.db import transaction
 from django.db.models import Q, Count
 from django.core.exceptions import ValidationError
-from django.contrib.auth.models import User
+from accounts.models import User
 from django.conf import settings
 from .models import Project, ProjectMember
 from accounts.models import UserProfile
 from common.git_utils import GitUtils
+import threading
+import os
 
 
 class ProjectService:
@@ -277,6 +279,60 @@ class ProjectService:
                 'member': member,
                 'success': True,
                 'message': f'User {username} added to project successfully'
+            }
+            
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError(f"Failed to add member: {str(e)}")
+    
+    @staticmethod
+    def add_project_member_by_user_id(project, user_id, role_id, user_profile):
+        """
+        Add a new member to the project using user UUID and role ID.
+        
+        Args:
+            project: Project instance
+            user_id: UUID of the user to add
+            role_id: Role ID to assign to the member
+            user_profile: UserProfile instance of the requester
+            
+        Returns:
+            Dictionary with addition result
+        """
+        if not ProjectService.check_owner_permission(project, user_profile):
+            raise ValidationError("Only project owner can add members")
+        
+        try:
+            # Validate role ID
+            from .models import ProjectRole
+            role_info = ProjectRole.get_role_by_id(role_id)
+            if not role_info:
+                raise ValidationError(f"Invalid role ID: {role_id}")
+            
+            # Get user by UUID
+            try:
+                user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                raise ValidationError("User with this ID does not exist")
+            
+            target_profile = user.profile
+            
+            # Check if user is already a member
+            if ProjectMember.objects.filter(project=project, profile=target_profile).exists():
+                raise ValidationError("This user is already a member of this project")
+            
+            # Create project member
+            member = ProjectMember.objects.create(
+                project=project,
+                profile=target_profile,
+                role=role_info["value"]
+            )
+            
+            return {
+                'member': member,
+                'success': True,
+                'message': f'User {user.username} added to project successfully with role {role_info["name"]}'
             }
             
         except ValidationError:
@@ -626,10 +682,14 @@ class ProjectService:
         except Exception as e:
             raise ValidationError(f"Failed to clone repository: {str(e)}")
     
+    # Simple in-memory cache for branch information
+    _branch_cache = {}
+    _cache_timeout = 300  # 5 minutes
+    
     @staticmethod
     def get_project_branches(project):
         """
-        Get all branches for a project's repository.
+        Get all branches for a project's repository with caching.
         
         Args:
             project: Project instance
@@ -638,6 +698,17 @@ class ProjectService:
             Dictionary with branches information
         """
         try:
+            import time
+            
+            # Check cache first
+            cache_key = f"branches_{project.id}"
+            current_time = time.time()
+            
+            if cache_key in ProjectService._branch_cache:
+                cached_data, cache_time = ProjectService._branch_cache[cache_key]
+                if current_time - cache_time < ProjectService._cache_timeout:
+                    return cached_data
+            
             repositories_root = os.getenv(
                 'TNM_REPOSITORIES_DIR',
                 os.path.join(settings.BASE_DIR, 'backend', 'tnm_repositories')
@@ -650,17 +721,29 @@ class ProjectService:
             branches = GitUtils.get_repository_branches(repo_dir)
             current_branch = GitUtils.get_current_branch(repo_dir)
             
-            return {
+            result = {
                 'success': True,
                 'branches': branches,
                 'current_branch': current_branch,
                 'repository_path': repo_dir
             }
             
+            # Cache the result
+            ProjectService._branch_cache[cache_key] = (result, current_time)
+            
+            return result
+            
         except ValidationError:
             raise
         except Exception as e:
             raise ValidationError(f"Failed to get repository branches: {str(e)}")
+    
+    @staticmethod
+    def _clear_branch_cache(project_id):
+        """Clear branch cache for a specific project."""
+        cache_key = f"branches_{project_id}"
+        if cache_key in ProjectService._branch_cache:
+            del ProjectService._branch_cache[cache_key]
     
     @staticmethod
     def switch_project_branch(project, branch_name):
@@ -691,6 +774,9 @@ class ProjectService:
             project.default_branch = branch_name
             project.save()
             
+            # Clear branch cache for this project
+            ProjectService._clear_branch_cache(project.id)
+
             return {
                 'success': True,
                 'message': f'Successfully switched to branch: {branch_name}',
@@ -702,6 +788,44 @@ class ProjectService:
             raise
         except Exception as e:
             raise ValidationError(f"Failed to switch branch: {str(e)}")
+
+    @staticmethod
+    def trigger_tnm_analysis_async(project: Project) -> None:
+        """Trigger TNM FilesOwnership analysis asynchronously using project's default branch.
+        Does not raise; any error is ignored.
+        """
+        def _run():
+            try:
+                # Late import to avoid circular deps
+                from tnm_integration.services import TnmService
+                branch = project.default_branch or 'main'
+
+                # Resolve paths
+                repos_root = getattr(settings, 'TNM_REPOSITORIES_DIR', os.getenv('TNM_REPOSITORIES_DIR', '/app/tnm_repositories'))
+                output_root = getattr(settings, 'TNM_OUTPUT_DIR', os.getenv('TNM_OUTPUT_DIR', '/app/tnm_output'))
+                repo_git_path = f"{repos_root}/project_{project.id}/.git"
+                project_output_root = f"{output_root}/project_{project.id}"
+
+                options = [
+                    '--repository', repo_git_path,
+                    '--developer-knowledge', f"{project_output_root}/DeveloperKnowledge.json",
+                    '--files-ownership', f"{project_output_root}/FilesOwnership.json",
+                    '--potential-ownership', f"{project_output_root}/PotentialAuthorship.json",
+                    branch,
+                ]
+
+                service = TnmService(
+                    java_path=getattr(settings, 'TNM_JAVA_PATH', 'java'),
+                    tnm_jar=getattr(settings, 'TNM_JAR_PATH', '/app/tnm-cli.jar'),
+                    run_script=getattr(settings, 'TNM_RUN_SCRIPT', None),
+                )
+                service.run_cli('FilesOwnershipMiner', options, args=[], timeout=getattr(settings, 'TNM_TIMEOUT', None))
+            except Exception:
+                # swallow
+                return
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
     
     @staticmethod
     def validate_and_clone_repository(repo_url, user_profile):
