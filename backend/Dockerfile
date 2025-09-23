@@ -27,6 +27,17 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Temurin JRE 11 (Adoptium)
+RUN apt-get update && apt-get install -y curl ca-certificates && \
+    curl -L -o /tmp/jre11.tar.gz \
+      https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.24%2B8/OpenJDK11U-jre_x64_linux_hotspot_11.0.24_8.tar.gz && \
+    mkdir -p /opt/java && tar -xzf /tmp/jre11.tar.gz -C /opt/java --strip-components=1 && \
+    rm -rf /tmp/jre11.tar.gz /var/lib/apt/lists/*
+
+# Java env (JRE 11)
+ENV JAVA_HOME=/opt/java
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
 # Create non-root user
 RUN groupadd -r django && useradd -r -g django django
 

@@ -61,6 +61,7 @@ services:
       - TNM_REPOSITORIES_DIR=/app/tnm_repositories
       - TNM_JAR_PATH=/app/tnm-cli.jar
       - TNM_TIMEOUT=1800
+      - TNM_STREAM_LOG=true
     ports:
       - "8000:8000"
     volumes:
