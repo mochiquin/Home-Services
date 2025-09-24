@@ -48,6 +48,7 @@ from .serializers import (
     ProjectMemberCreateSerializer, ProjectStatsSerializer
 )
 from .services import ProjectService
+from common.git_utils import GitPermissionError
 from accounts.models import UserProfile
 from common.response import ApiResponse
 
@@ -123,6 +124,23 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 message=result.get('message', 'Project created successfully')
             )
             
+        except GitPermissionError as e:
+            logger.warning("Project creation failed - Git permission error", extra={
+                'user_id': user_id,
+                'project_name': project_name,
+                'error_type': e.error_type,
+                'error': str(e)
+            })
+            return ApiResponse.error(
+                error_message=e.message,
+                error_code=f"GIT_{e.error_type}",
+                status_code=status.HTTP_403_FORBIDDEN,
+                data={
+                    'error_type': e.error_type,
+                    'solution': e.solution,
+                    'stderr': e.stderr
+                }
+            )
         except ValidationError as e:
             logger.warning("Project creation failed - validation error", extra={
                 'user_id': user_id,
@@ -694,6 +712,18 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 message=result['message']
             )
             
+        except GitPermissionError as e:
+            return ApiResponse.error(
+                error_message=e.message,
+                error_code=f'GIT_{e.error_type}',
+                status_code=status.HTTP_403_FORBIDDEN,
+                data={
+                    'valid': False,
+                    'error_type': e.error_type,
+                    'solution': e.solution,
+                    'stderr': e.stderr
+                }
+            )
         except ValidationError as e:
             return ApiResponse.error(
                 error_message=str(e),
@@ -705,6 +735,112 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return ApiResponse.internal_error(
                 error_message='Repository validation failed',
                 error_code='REPO_VALIDATION_ERROR'
+            )
+    
+    @action(detail=True, methods=['post'])
+    def retry_repository_access(self, request, id=None):
+        """Retry repository access after fixing authentication issues."""
+        try:
+            project = self.get_object()
+            user_profile = request.user.profile
+            
+            # Check if user has permission to update project
+            if not ProjectService.check_project_access(project, user_profile):
+                return ApiResponse.forbidden(
+                    error_message="You do not have permission to access this project",
+                    error_code="ACCESS_DENIED"
+                )
+            
+            if not project.repo_url:
+                return ApiResponse.error(
+                    error_message="Project has no repository URL configured",
+                    error_code="NO_REPOSITORY_URL"
+                )
+            
+            logger.info("Retrying repository access", extra={
+                'user_id': request.user.id,
+                'project_id': project.id,
+                'repo_url': project.repo_url
+            })
+            
+            # Try to validate repository access again
+            try:
+                validation_result = ProjectService.validate_and_clone_repository(project.repo_url, user_profile)
+                
+                # Try to clone/update the repository if validation succeeds
+                try:
+                    clone_result = ProjectService.clone_repository_for_project(project, project.repo_url)
+                    
+                    logger.info("Repository retry successful - cloned", extra={
+                        'user_id': request.user.id,
+                        'project_id': project.id,
+                        'used_authentication': clone_result.get('used_authentication', False)
+                    })
+                    
+                    return ApiResponse.success(
+                        data={
+                            'status': 'success',
+                            'action': 'cloned',
+                            'repository_info': {
+                                'branches': clone_result.get('branches', []),
+                                'current_branch': clone_result.get('current_branch'),
+                                'used_authentication': clone_result.get('used_authentication', False)
+                            }
+                        },
+                        message="Repository access restored and repository cloned successfully"
+                    )
+                    
+                except Exception as clone_error:
+                    # If cloning fails but validation succeeded, still report partial success
+                    logger.warning("Repository retry partially successful - validation only", extra={
+                        'user_id': request.user.id,
+                        'project_id': project.id,
+                        'clone_error': str(clone_error)
+                    })
+                    
+                    return ApiResponse.success(
+                        data={
+                            'status': 'partial_success',
+                            'action': 'validated',
+                            'validation_info': {
+                                'branches': validation_result.get('branches', []),
+                                'default_branch': validation_result.get('default_branch'),
+                                'used_authentication': validation_result.get('used_authentication', False)
+                            },
+                            'warning': f"Repository is accessible but cloning failed: {str(clone_error)}"
+                        },
+                        message="Repository access restored but cloning failed"
+                    )
+                    
+            except GitPermissionError as e:
+                logger.warning("Repository retry failed - still permission issues", extra={
+                    'user_id': request.user.id,
+                    'project_id': project.id,
+                    'error_type': e.error_type,
+                    'error': str(e)
+                })
+                
+                return ApiResponse.error(
+                    error_message=f"Repository access still failed: {e.message}",
+                    error_code=f"GIT_{e.error_type}",
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    data={
+                        'status': 'failed',
+                        'error_type': e.error_type,
+                        'solution': e.solution,
+                        'stderr': e.stderr
+                    }
+                )
+                
+        except Exception as e:
+            logger.error("Repository retry failed - system error", extra={
+                'user_id': request.user.id,
+                'project_id': project.id if 'project' in locals() else None,
+                'error': str(e)
+            }, exc_info=True)
+            return ApiResponse.internal_error(
+                error_message="Failed to retry repository access",
+                error_code="REPOSITORY_RETRY_ERROR"
             )
 
 

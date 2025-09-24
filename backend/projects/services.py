@@ -10,7 +10,7 @@ from accounts.models import User
 from django.conf import settings
 from .models import Project, ProjectMember
 from accounts.models import UserProfile
-from common.git_utils import GitUtils
+from common.git_utils import GitUtils, GitPermissionError
 import threading
 import os
 
@@ -96,7 +96,7 @@ class ProjectService:
     def create_project(project_data, owner_profile):
         """
         Create a new project with owner as member.
-        If repo_url is provided, clone the repository.
+        If repo_url is provided, validate access and clone the repository.
         
         Args:
             project_data: Dictionary containing project data
@@ -106,10 +106,31 @@ class ProjectService:
             Dictionary with creation result
         """
         try:
+            repo_url = project_data.get('repo_url')
+            
+            # Pre-validate repository access if URL is provided
+            if repo_url:
+                try:
+                    # Validate repository access before creating project
+                    validation_result = GitUtils.validate_repository_access(repo_url, owner_profile)
+                    
+                    # Update project data with validated branch information
+                    if not project_data.get('default_branch'):
+                        project_data['default_branch'] = validation_result.get('default_branch', 'main')
+                        
+                except GitPermissionError as e:
+                    # Re-raise with context that this is during project creation
+                    raise GitPermissionError(
+                        error_type=e.error_type,
+                        message=f"Cannot create project: {e.message}",
+                        stderr=e.stderr,
+                        solution=e.solution
+                    )
+            
             # Create project
             project = Project.objects.create(
                 name=project_data['name'],
-                repo_url=project_data['repo_url'],
+                repo_url=project_data.get('repo_url', ''),
                 default_branch=project_data.get('default_branch', ''),
                 owner_profile=owner_profile
             )
@@ -122,7 +143,6 @@ class ProjectService:
             )
             
             # If repository URL is provided, clone the repository
-            repo_url = project_data.get('repo_url')
             if repo_url:
                 try:
                     clone_result = ProjectService.clone_repository_for_project(project, repo_url)
@@ -133,11 +153,16 @@ class ProjectService:
                         'repository_info': {
                             'branches': clone_result['branches'],
                             'current_branch': clone_result['current_branch'],
-                            'repository_path': clone_result['repository_path']
+                            'repository_path': clone_result['repository_path'],
+                            'used_authentication': clone_result.get('used_authentication', False)
                         }
                     }
+                except GitPermissionError as e:
+                    # Delete the project if cloning fails due to permission issues
+                    project.delete()
+                    raise e
                 except ValidationError as e:
-                    # If cloning fails, still return the project but with a warning
+                    # If cloning fails for other reasons, still return the project but with a warning
                     return {
                         'project': project,
                         'success': True,
@@ -151,6 +176,8 @@ class ProjectService:
                 'message': 'Project created successfully'
             }
             
+        except GitPermissionError:
+            raise  # Re-raise GitPermissionError as-is
         except Exception as e:
             raise ValidationError(f"Failed to create project: {str(e)}")
     
@@ -656,8 +683,8 @@ class ProjectService:
             )
             repo_dir = os.path.join(repositories_root, f"project_{project.id}")
             
-            # Clone the repository
-            clone_result = GitUtils.clone_repository(repo_url, repo_dir, branch)
+            # Clone the repository with user authentication
+            clone_result = GitUtils.clone_repository(repo_url, repo_dir, branch, project.owner_profile)
             
             # Get available branches
             branches = GitUtils.get_repository_branches(repo_dir)
@@ -677,6 +704,14 @@ class ProjectService:
                 'project': project
             }
             
+        except GitPermissionError as e:
+            # Re-raise GitPermissionError with additional context
+            raise GitPermissionError(
+                error_type=e.error_type,
+                message=f"Repository access failed: {e.message}",
+                stderr=e.stderr,
+                solution=e.solution
+            )
         except ValidationError:
             raise
         except Exception as e:
@@ -845,7 +880,7 @@ class ProjectService:
                 raise ValidationError("Invalid repository URL format. Please provide a valid Git repository URL.")
             
             # Use lightweight validation - just check if repository is accessible
-            validation_result = GitUtils.validate_repository_access(repo_url)
+            validation_result = GitUtils.validate_repository_access(repo_url, user_profile)
             
             return {
                 'success': True,
@@ -855,6 +890,14 @@ class ProjectService:
                 'repo_url': repo_url
             }
             
+        except GitPermissionError as e:
+            # Re-raise GitPermissionError with additional context for validation
+            raise GitPermissionError(
+                error_type=e.error_type,
+                message=f"Repository validation failed: {e.message}",
+                stderr=e.stderr,
+                solution=e.solution
+            )
         except ValidationError:
             raise
         except Exception as e:

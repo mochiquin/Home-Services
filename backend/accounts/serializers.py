@@ -1,218 +1,160 @@
+"""
+Serializers for accounts app models.
+"""
+
 from rest_framework import serializers
-from .models import User, UserProfile
+from django.contrib.auth import authenticate
+from .models import User, UserProfile, GitCredential
+
 
 class UserSerializer(serializers.ModelSerializer):
-    """
-    Serializer for basic user information.
-    Returns read-only fields for security purposes.
-    """
+    """Serializer for User model."""
+    
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'date_joined', 'is_active']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'date_joined']
         read_only_fields = ['id', 'date_joined']
 
+
 class UserProfileSerializer(serializers.ModelSerializer):
-    """
-    Serializer for user profile information.
-    Includes nested user data for complete profile view.
-    """
+    """Serializer for UserProfile model."""
+    
     user = UserSerializer(read_only=True)
     
     class Meta:
         model = UserProfile
-        fields = ['user', 'contact_email', 'display_name', 'avatar', 'created_at', 'updated_at']
+        fields = [
+            'user', 'contact_email', 'display_name', 'avatar',
+            'created_at', 'updated_at', 'selected_project'
+        ]
         read_only_fields = ['created_at', 'updated_at']
 
-class UserProfileSimpleSerializer(serializers.ModelSerializer):
-    """
-    Simplified user profile serializer without nested user data.
-    Used to avoid circular references in UserDetailSerializer.
-    """
-    class Meta:
-        model = UserProfile
-        fields = ['contact_email', 'display_name', 'avatar', 'created_at', 'updated_at']
-        read_only_fields = ['created_at', 'updated_at']
 
-class UserProfileUpdateSerializer(serializers.Serializer):
-    """
-    Serializer for updating user profile information.
-    Only allows updating contact_email, first_name, and last_name.
-    display_name is auto-generated from first_name + last_name.
-    Uses service layer for business logic.
-    """
-    first_name = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        max_length=150,
-        help_text="User's first name"
-    )
-    last_name = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        max_length=150,
-        help_text="User's last name"
-    )
-    contact_email = serializers.EmailField(
-        required=False,
-        allow_blank=True,
-        help_text="Contact email address"
-    )
+class GitCredentialSerializer(serializers.ModelSerializer):
+    """Serializer for GitCredential model."""
     
-    def validate_contact_email(self, value):
-        """Validate contact email if provided"""
-        if value and len(value.strip()) == 0:
-            return None
-        return value
-    
-    def validate_first_name(self, value):
-        """Validate first name if provided"""
-        if value and len(value.strip()) == 0:
-            return None
-        return value
-    
-    def validate_last_name(self, value):
-        """Validate last name if provided"""
-        if value and len(value.strip()) == 0:
-            return None
-        return value
-    
-    def update(self, instance, validated_data):
-        """
-        Update user profile using service layer.
-        This method is called by DRF but we delegate to service layer.
-        """
-        # Import here to avoid circular imports
-        from .services import UserProfileService
-        
-        # Use service layer for business logic
-        result = UserProfileService.update_user_profile(instance.user, validated_data)
-        
-        # Return the updated profile instance
-        return result['profile']
-
-class UserDetailSerializer(serializers.ModelSerializer):
-    """
-    Detailed user serializer that includes profile information.
-    Used for complete user information display.
-    """
-    profile = UserProfileSimpleSerializer(read_only=True)
-    
+    # Don't expose encrypted data in serialization
     class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'date_joined', 'is_active', 'profile']
-        read_only_fields = ['id', 'date_joined']
+        model = GitCredential
+        fields = [
+            'id', 'credential_type', 'provider', 'username', 
+            'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
-class UserRegistrationSerializer(serializers.ModelSerializer):
-    """
-    Serializer for user registration.
-    Only requires email, password, and password confirmation.
-    Username is automatically generated from email.
-    Display name defaults to email, can be updated later via profile update.
-    """
-    password = serializers.CharField(
-        write_only=True, 
-        min_length=8, 
-        style={'input_type': 'password'},
-        help_text="Password must be at least 8 characters long"
-    )
-    password_confirm = serializers.CharField(
-        write_only=True, 
-        style={'input_type': 'password'},
-        help_text="Confirm your password"
-    )
+
+class GitCredentialCreateSerializer(serializers.Serializer):
+    """Serializer for creating Git credentials."""
     
-    class Meta:
-        model = User
-        fields = ['email', 'password', 'password_confirm']
+    credential_type = serializers.ChoiceField(choices=GitCredential.CredentialType.choices)
+    provider = serializers.CharField(max_length=50, default='github')
+    
+    # For HTTPS token
+    token = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    
+    # For basic auth
+    username = serializers.CharField(required=False, allow_blank=True)
+    password = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    
+    # For SSH key
+    private_key = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    ssh_username = serializers.CharField(required=False, default='git')
     
     def validate(self, data):
-        """Validate that passwords match"""
+        """Validate that required fields are provided based on credential type."""
+        credential_type = data.get('credential_type')
+        
+        if credential_type == GitCredential.CredentialType.HTTPS_TOKEN:
+            if not data.get('token'):
+                raise serializers.ValidationError("Token is required for HTTPS token authentication")
+        elif credential_type == GitCredential.CredentialType.BASIC_AUTH:
+            if not data.get('username') or not data.get('password'):
+                raise serializers.ValidationError("Username and password are required for basic authentication")
+        elif credential_type == GitCredential.CredentialType.SSH_KEY:
+            if not data.get('private_key'):
+                raise serializers.ValidationError("Private key is required for SSH authentication")
+        
+        return data
+    
+    def create(self, validated_data):
+        """Create a new Git credential."""
+        user_profile = self.context['request'].user.profile
+        credential_type = validated_data['credential_type']
+        provider = validated_data.get('provider', 'github')
+        
+        # Remove existing credential of same type and provider
+        GitCredential.objects.filter(
+            user_profile=user_profile,
+            provider=provider,
+            credential_type=credential_type
+        ).delete()
+        
+        # Create new credential
+        credential = GitCredential(
+            user_profile=user_profile,
+            credential_type=credential_type,
+            provider=provider
+        )
+        
+        if credential_type == GitCredential.CredentialType.HTTPS_TOKEN:
+            credential.set_token(validated_data['token'])
+        elif credential_type == GitCredential.CredentialType.BASIC_AUTH:
+            credential.set_basic_auth(validated_data['username'], validated_data['password'])
+        elif credential_type == GitCredential.CredentialType.SSH_KEY:
+            credential.set_ssh_key(validated_data['private_key'], validated_data.get('ssh_username', 'git'))
+        
+        credential.save()
+        return credential
+
+
+class LoginSerializer(serializers.Serializer):
+    """Serializer for user login."""
+    
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+    
+    def validate(self, data):
+        """Validate user credentials."""
+        username = data.get('username')
+        password = data.get('password')
+        
+        if username and password:
+            user = authenticate(username=username, password=password)
+            if user:
+                if user.is_active:
+                    data['user'] = user
+                else:
+                    raise serializers.ValidationError("User account is disabled")
+            else:
+                raise serializers.ValidationError("Invalid username or password")
+        else:
+            raise serializers.ValidationError("Username and password are required")
+        
+        return data
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    """Serializer for user registration."""
+    
+    password = serializers.CharField(write_only=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True)
+    
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'password', 'password_confirm', 'first_name', 'last_name']
+    
+    def validate(self, data):
+        """Validate password confirmation."""
         if data['password'] != data['password_confirm']:
             raise serializers.ValidationError("Passwords do not match")
         return data
     
-    def validate_email(self, value):
-        """Validate that email is unique"""
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("A user with this email address already exists")
-        return value
-    
     def create(self, validated_data):
-        """Create new user and associated profile"""
+        """Create a new user with profile."""
         validated_data.pop('password_confirm')
-        email = validated_data.get('email')
-        password = validated_data.get('password')
+        user = User.objects.create_user(**validated_data)
         
-        # Auto-generate a unique username from email local part
-        base_username = (email.split('@')[0] if email else 'user').strip() or 'user'
-        candidate = base_username
-        counter = 1
-        while User.objects.filter(username=candidate).exists():
-            counter += 1
-            candidate = f"{base_username}{counter}"
+        # Create user profile
+        UserProfile.objects.create(user=user)
         
-        # Create user with auto-generated username (no first_name, last_name)
-        user = User.objects.create_user(
-            username=candidate, 
-            email=email, 
-            password=password
-        )
-        
-        # Automatically create user profile
-        # display_name will be auto-generated in UserProfile.save() method (defaults to email)
-        UserProfile.objects.create(
-            user=user, 
-            contact_email=user.email
-        )
         return user
-
-class PasswordChangeSerializer(serializers.Serializer):
-    """
-    Serializer for password change functionality.
-    Requires old password verification and new password confirmation.
-    """
-    old_password = serializers.CharField(
-        required=True, 
-        style={'input_type': 'password'},
-        help_text="Your current password"
-    )
-    new_password = serializers.CharField(
-        required=True, 
-        min_length=8, 
-        style={'input_type': 'password'},
-        help_text="New password must be at least 8 characters long"
-    )
-    new_password_confirm = serializers.CharField(
-        required=True, 
-        style={'input_type': 'password'},
-        help_text="Confirm your new password"
-    )
-    
-    def validate(self, data):
-        """Validate that new passwords match"""
-        if data['new_password'] != data['new_password_confirm']:
-            raise serializers.ValidationError("New passwords do not match")
-        return data
-    
-    def validate_old_password(self, value):
-        """Validate that old password is correct"""
-        user = self.context['request'].user
-        if not user.check_password(value):
-            raise serializers.ValidationError("Old password is incorrect")
-        return value
-
-class UserUpdateSerializer(serializers.ModelSerializer):
-    """
-    Serializer for updating user basic information.
-    Only allows modification of safe fields.
-    """
-    class Meta:
-        model = User
-        fields = ['first_name', 'last_name', 'email']
-    
-    def validate_email(self, value):
-        """Validate that email is unique among other users"""
-        user = self.instance
-        if User.objects.filter(email=value).exclude(id=user.id).exists():
-            raise serializers.ValidationError("This email is already in use by another user")
-        return value

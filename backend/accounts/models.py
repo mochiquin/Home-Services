@@ -1,7 +1,9 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
+from cryptography.fernet import Fernet
 import uuid
+import base64
 
 
 class User(AbstractUser):
@@ -73,3 +75,122 @@ class UserProfile(models.Model):
         else:
             self.display_name = self.user.email or self.user.username
         super().save(*args, **kwargs)
+
+
+class GitCredential(models.Model):
+    """Store encrypted Git authentication credentials for users."""
+    
+    class CredentialType(models.TextChoices):
+        HTTPS_TOKEN = "https_token", "HTTPS Personal Access Token"
+        SSH_KEY = "ssh_key", "SSH Private Key"
+        BASIC_AUTH = "basic_auth", "Username/Password"
+    
+    user_profile = models.ForeignKey(
+        UserProfile,
+        on_delete=models.CASCADE,
+        related_name='git_credentials'
+    )
+    
+    credential_type = models.CharField(
+        max_length=20,
+        choices=CredentialType.choices,
+        default=CredentialType.HTTPS_TOKEN
+    )
+    
+    provider = models.CharField(
+        max_length=50,
+        default='github',
+        help_text="Git provider (github, gitlab, bitbucket, etc.)"
+    )
+    
+    # Encrypted credential data
+    encrypted_data = models.TextField(
+        help_text="Encrypted credential data (token, username/password, ssh key)"
+    )
+    
+    username = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Username for basic auth or git user"
+    )
+    
+    is_active = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['user_profile', 'provider', 'credential_type']
+        verbose_name = "Git Credential"
+        verbose_name_plural = "Git Credentials"
+    
+    def __str__(self):
+        return f"GitCredential({self.user_profile.user.username}, {self.provider}, {self.credential_type})"
+    
+    @classmethod
+    def _get_encryption_key(cls):
+        """Get encryption key from settings or generate one."""
+        key = getattr(settings, 'GIT_CREDENTIAL_ENCRYPTION_KEY', None)
+        if not key:
+            # Generate a key for development - in production this should be set in settings
+            key = Fernet.generate_key()
+        if isinstance(key, str):
+            key = key.encode()
+        return key
+    
+    def encrypt_credential(self, credential_data):
+        """Encrypt credential data before storing."""
+        try:
+            f = Fernet(self._get_encryption_key())
+            if isinstance(credential_data, str):
+                credential_data = credential_data.encode()
+            encrypted = f.encrypt(credential_data)
+            self.encrypted_data = base64.b64encode(encrypted).decode()
+        except Exception as e:
+            raise ValueError(f"Failed to encrypt credential: {str(e)}")
+    
+    def decrypt_credential(self):
+        """Decrypt and return credential data."""
+        try:
+            f = Fernet(self._get_encryption_key())
+            encrypted_bytes = base64.b64decode(self.encrypted_data.encode())
+            decrypted = f.decrypt(encrypted_bytes)
+            return decrypted.decode()
+        except Exception as e:
+            raise ValueError(f"Failed to decrypt credential: {str(e)}")
+    
+    def set_token(self, token):
+        """Set a personal access token."""
+        self.credential_type = self.CredentialType.HTTPS_TOKEN
+        self.encrypt_credential(token)
+    
+    def set_basic_auth(self, username, password):
+        """Set username/password for basic auth."""
+        self.credential_type = self.CredentialType.BASIC_AUTH
+        self.username = username
+        self.encrypt_credential(password)
+    
+    def set_ssh_key(self, private_key, username='git'):
+        """Set SSH private key."""
+        self.credential_type = self.CredentialType.SSH_KEY
+        self.username = username
+        self.encrypt_credential(private_key)
+    
+    def get_auth_url(self, repo_url):
+        """Get authenticated URL for repository access."""
+        if self.credential_type == self.CredentialType.HTTPS_TOKEN:
+            token = self.decrypt_credential()
+            # For GitHub, GitLab, etc., use token in URL
+            if repo_url.startswith('https://github.com/'):
+                return repo_url.replace('https://github.com/', f'https://{token}@github.com/')
+            elif repo_url.startswith('https://gitlab.com/'):
+                return repo_url.replace('https://gitlab.com/', f'https://oauth2:{token}@gitlab.com/')
+            else:
+                # Generic HTTPS with token
+                return repo_url.replace('https://', f'https://{token}@')
+        elif self.credential_type == self.CredentialType.BASIC_AUTH:
+            password = self.decrypt_credential()
+            if repo_url.startswith('https://'):
+                return repo_url.replace('https://', f'https://{self.username}:{password}@')
+        
+        return repo_url  # Return original URL if no auth can be applied

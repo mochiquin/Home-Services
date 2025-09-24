@@ -245,24 +245,83 @@ docker-compose exec backend python manage.py migrate
 
 **Happy Coding! 🎉**
 
-## 🔧 API Documentation
+## 🔧 Backend (Django REST API)
+
+### Architecture
+
+The backend is built with Django REST Framework and provides comprehensive APIs for:
+
+- **User Management** (`accounts/`) - Authentication, user profiles, Git credentials
+- **Project Management** (`projects/`) - Project lifecycle, membership, Git integration
+- **Contributors Analysis** (`contributors/`) - Developer contribution metrics
+- **Coordination Analysis** (`coordination/`) - Team coordination analysis
+- **Risk Assessment** (`risks/`) - Security and code quality analysis
+- **TNM Integration** (`tnm_integration/`) - Code analysis tool integration
+
+### API Endpoints
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| **Health Check** | `GET /api/health/` | Service status |
+| **Authentication** | `/api/auth/` | Login, register, profile |
+| **Users** | `/api/users/` | User management |
+| **Git Credentials** | `/api/git-credentials/` | Git authentication management |
+| **Projects** | `/api/projects/` | Project operations |
+| **Contributors** | `/api/contributors/` | Contribution analysis |
+| **Coordination** | `/api/coordination/` | Team coordination |
+| **Risks** | `/api/risks/` | Risk assessment |
+| **TNM** | `/api/tnm/` | Code analysis |
+
+### Authentication
+
+- **JWT Authentication** via `djangorestframework-simplejwt`
+- **Token Endpoints**:
+  - `POST /api/auth/login/` - Obtain tokens
+  - `POST /api/auth/token/refresh/` - Refresh access token
+  - `POST /api/auth/logout/` - Logout (blacklist token)
+
+### Git Integration Features
+
+- **Multi-provider Support**: GitHub, GitLab, Bitbucket
+- **Authentication Methods**: 
+  - HTTPS Personal Access Tokens
+  - SSH Private Keys
+  - Username/Password (Basic Auth)
+- **Encrypted Credential Storage**: Secure credential management
+- **Permission Error Handling**: Detailed error analysis and solutions
+- **Repository Validation**: Pre-clone access verification
+- **Retry Mechanisms**: Recovery after authentication fixes
+
+### Database
+
+- **Development**: SQLite (default)
+- **Production**: MySQL 8.0 (via Docker)
+- **Migrations**: All models include proper migrations
+- **Admin Interface**: Available at `/admin/`
+
+### Common Backend Commands
+
+```bash
+# Database operations
+docker-compose exec backend python manage.py showmigrations
+docker-compose exec backend python manage.py makemigrations
+docker-compose exec backend python manage.py migrate
+
+# User management
+docker-compose exec backend python manage.py createsuperuser
+docker-compose exec backend python manage.py shell
+
+# Development tools
+docker-compose exec backend python manage.py check
+docker-compose exec backend python manage.py collectstatic
+```
+
+### API Documentation
 
 The project includes comprehensive API documentation through Postman:
 
 - **Environment File**: `Postman_Environment.json` - Contains all necessary variables
 - **Collection File**: `Secuflow_API_Collection.json` - Complete API test suite
-
-### API Modules
-
-| Module | Description | Endpoints |
-|--------|-------------|-----------|
-| **Authentication** | User login, registration, profile | `/api/auth/` |
-| **User Management** | User CRUD operations | `/api/users/` |
-| **Project Management** | Project lifecycle management | `/api/projects/` |
-| **Contributors Analysis** | Developer contribution analysis | `/api/contributors/` |
-| **Coordination Analysis** | Team coordination metrics | `/api/coordination/` |
-| **Risk Assessment** | Security and code quality analysis | `/api/risks/` |
-| **TNM Integration** | Code analysis tool integration | `/api/tnm/` |
 
 ### Middleware Features
 
@@ -270,6 +329,7 @@ The project includes comprehensive API documentation through Postman:
 - **Global Exception Handling**: Unified error response format
 - **API Response Envelope**: Consistent response structure across all endpoints
 - **Content Rendering**: Automatic DRF response processing
+- **Git Error Analysis**: Intelligent error detection and solution guidance
 
 ## 📦 Version Control & Cleanup
 
@@ -278,6 +338,7 @@ The project includes comprehensive API documentation through Postman:
 - ✅ Deleted empty log files and `logs/` directory (using console logging)
 - ✅ Removed empty `backend/tnm-cli.jar` file
 - ✅ Cleaned all `__pycache__/` directories
+- ✅ Migrated `backend/README.md` to root README and deleted duplicate
 
 ### Gitignore Coverage
 - Virtual environments (`venv/`, `.venv/`)

@@ -211,10 +211,10 @@ class UserService:
         Returns:
             Dictionary with registration result
         """
-        from .serializers import UserRegistrationSerializer
+        from .serializers import RegisterSerializer
         
         # Validate registration data
-        serializer = UserRegistrationSerializer(data=user_data)
+        serializer = RegisterSerializer(data=user_data)
         if not serializer.is_valid():
             raise ValidationError(f"Registration validation failed: {serializer.errors}")
         
@@ -377,9 +377,9 @@ class UserService:
         Returns:
             Dictionary with update result
         """
-        from .serializers import UserUpdateSerializer
+        from .serializers import UserSerializer
         
-        serializer = UserUpdateSerializer(user, data=user_data, partial=True)
+        serializer = UserSerializer(user, data=user_data, partial=True)
         if not serializer.is_valid():
             raise ValidationError(f"User update validation failed: {serializer.errors}")
         

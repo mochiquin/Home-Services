@@ -11,9 +11,7 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 from .models import UserProfile
 from .serializers import (
-    UserSerializer, UserDetailSerializer, UserProfileSerializer, 
-    UserRegistrationSerializer, PasswordChangeSerializer, UserUpdateSerializer,
-    UserProfileUpdateSerializer
+    UserSerializer, UserProfileSerializer, RegisterSerializer, LoginSerializer
 )
 from .services import UserProfileService, UserService
 from common.response import ApiResponse
@@ -53,7 +51,7 @@ def login_view(request):
             data={
                 'refresh': tokens['refresh'],
                 'access': tokens['access'],
-                'user': UserDetailSerializer(auth_result['user']).data
+                'user': UserSerializer(auth_result['user']).data
             },
             message=auth_result['message']
         )
@@ -110,7 +108,7 @@ def register_view(request):
             data={
                 'refresh': result['tokens']['refresh'],
                 'access': result['tokens']['access'],
-                'user': UserDetailSerializer(result['user']).data
+                'user': UserSerializer(result['user']).data
             },
             message=result['message']
         )
@@ -204,9 +202,9 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
         if self.action in ['retrieve', 'list']:
-            return UserDetailSerializer
+            return UserSerializer
         elif self.action in ['update', 'partial_update']:
-            return UserUpdateSerializer
+            return UserSerializer
         return UserSerializer
     
     def get_queryset(self):
@@ -337,7 +335,7 @@ class UserViewSet(viewsets.ModelViewSet):
             })
             
             return ApiResponse.success(
-                data=UserDetailSerializer(result['user']).data,
+                data=UserSerializer(result['user']).data,
                 message="User information retrieved successfully"
             )
             
@@ -366,7 +364,7 @@ class UserViewSet(viewsets.ModelViewSet):
         
         try:
             # Validate input data
-            serializer = UserProfileUpdateSerializer(data=request.data, partial=True)
+            serializer = UserProfileSerializer(data=request.data, partial=True)
             if not serializer.is_valid():
                 logger.warning("Profile update failed - validation error", extra={
                     'user_id': user_id,
@@ -392,7 +390,7 @@ class UserViewSet(viewsets.ModelViewSet):
             # Return updated user information
             return ApiResponse.success(
                 data={
-                    'user': UserDetailSerializer(result['user']).data
+                    'user': UserSerializer(result['user']).data
                 },
                 message=result['message']
             )
@@ -427,23 +425,22 @@ class UserViewSet(viewsets.ModelViewSet):
         
         try:
             # Validate input data
-            serializer = PasswordChangeSerializer(data=request.data, context={'request': request})
-            if not serializer.is_valid():
-                logger.warning("Password change failed - validation error", extra={
-                    'user_id': user_id,
-                    'validation_errors': serializer.errors
-                })
+            # 简化的密码验证逻辑
+            old_password = request.data.get('old_password')
+            new_password = request.data.get('new_password')
+            
+            if not old_password or not new_password:
                 return ApiResponse.error(
-                    error_message="Password change validation failed",
-                    error_code="VALIDATION_ERROR",
-                    data=serializer.errors
+                    error_message="Both old_password and new_password are required",
+                    error_code='PASSWORD_CHANGE_ERROR',
+                    status_code=status.HTTP_400_BAD_REQUEST
                 )
             
             # Use service layer for password change
             result = UserService.change_password(
                 request.user,
-                serializer.validated_data['old_password'],
-                serializer.validated_data['new_password']
+                old_password,
+                new_password
             )
             
             logger.info("Password changed successfully", extra={

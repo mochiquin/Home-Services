@@ -5,16 +5,207 @@ Handles cloning, branch listing, and repository operations.
 import os
 import subprocess
 import shutil
+import re
 from pathlib import Path
 from typing import List, Dict, Optional
 from django.core.exceptions import ValidationError
+
+
+class GitPermissionError(ValidationError):
+    """Specific exception for Git permission issues."""
+    
+    def __init__(self, error_type: str, message: str, stderr: str = "", solution: str = ""):
+        self.error_type = error_type
+        self.stderr = stderr
+        self.solution = solution
+        super().__init__(message)
 
 
 class GitUtils:
     """Utility class for Git operations."""
     
     @staticmethod
-    def clone_repository(repo_url: str, target_dir: str, branch: Optional[str] = None) -> Dict:
+    def _analyze_git_error(stderr: str, repo_url: str = "") -> GitPermissionError:
+        """
+        Analyze Git error messages and return specific permission error type and solution.
+        
+        Args:
+            stderr: Git command error output
+            repo_url: Repository URL
+            
+        Returns:
+            GitPermissionError with specific error type and solution
+        """
+        stderr_lower = stderr.lower()
+        
+        # Permission denied errors
+        if any(phrase in stderr_lower for phrase in [
+            'permission denied', 'access denied', 'permission denied (publickey)',
+            'could not read from remote repository', 'please make sure you have the correct access rights'
+        ]):
+            if 'publickey' in stderr_lower or 'ssh' in stderr_lower:
+                # Provide specific guidance for SSH issues
+                if 'github.com' in repo_url:
+                    solution = ("SSH access denied for GitHub. Please:\n"
+                              "1. Generate SSH keys: ssh-keygen -t ed25519 -C \"your_email@example.com\"\n"
+                              "2. Add public key to GitHub: Settings > SSH and GPG keys\n" 
+                              "3. Or use HTTPS with Personal Access Token instead")
+                elif 'gitlab.com' in repo_url:
+                    solution = ("SSH access denied for GitLab. Please:\n"
+                              "1. Generate SSH keys: ssh-keygen -t ed25519 -C \"your_email@example.com\"\n"
+                              "2. Add public key to GitLab: User Settings > SSH Keys\n"
+                              "3. Or use HTTPS with Personal Access Token instead")
+                else:
+                    solution = ("SSH access denied. Please:\n"
+                              "1. Generate SSH keys if you don't have them\n"
+                              "2. Add your public key to the Git provider\n"
+                              "3. Or use HTTPS with authentication instead")
+                    
+                return GitPermissionError(
+                    error_type="SSH_PERMISSION_DENIED",
+                    message="SSH access denied, unable to access private repository",
+                    stderr=stderr,
+                    solution=solution
+                )
+            else:
+                # Provide specific guidance for HTTPS issues
+                if 'github.com' in repo_url:
+                    solution = ("HTTPS access denied for GitHub. Please:\n"
+                              "1. Create Personal Access Token: GitHub Settings > Developer settings > Personal access tokens\n"
+                              "2. Grant 'repo' scope for private repositories\n"
+                              "3. Configure the token in Secuflow: Account Settings > Git Credentials")
+                elif 'gitlab.com' in repo_url:
+                    solution = ("HTTPS access denied for GitLab. Please:\n"
+                              "1. Create Personal Access Token: GitLab User Settings > Access Tokens\n"
+                              "2. Grant 'read_repository' and 'write_repository' scopes\n"
+                              "3. Configure the token in Secuflow: Account Settings > Git Credentials")
+                else:
+                    solution = ("HTTPS access denied. Please:\n"
+                              "1. Create a Personal Access Token in your Git provider\n"
+                              "2. Grant appropriate repository access permissions\n"
+                              "3. Configure the token in Secuflow: Account Settings > Git Credentials")
+                    
+                return GitPermissionError(
+                    error_type="HTTPS_PERMISSION_DENIED", 
+                    message="HTTPS access denied, authentication may be required",
+                    stderr=stderr,
+                    solution=solution
+                )
+        
+        # Repository not found or inaccessible
+        if any(phrase in stderr_lower for phrase in [
+            'repository not found', 'not found', 'does not exist',
+            'repository does not exist', 'fatal: remote error'
+        ]):
+            solution = ("Repository not found. Please verify:\n"
+                       "1. Repository URL is correct (check spelling and case)\n"
+                       "2. Repository exists and is not deleted\n"
+                       "3. You have access permissions to the repository\n"
+                       "4. For private repositories, ensure you have proper authentication configured")
+            
+            return GitPermissionError(
+                error_type="REPOSITORY_NOT_FOUND",
+                message="Repository does not exist or is not accessible",
+                stderr=stderr,
+                solution=solution
+            )
+        
+        # Network connection issues  
+        if any(phrase in stderr_lower for phrase in [
+            'failed to connect', 'connection timed out', 'network is unreachable',
+            'temporary failure in name resolution', 'could not resolve host'
+        ]):
+            solution = ("Network connection failed. Please:\n"
+                       "1. Check your internet connection\n"
+                       "2. Verify the Git provider is accessible (try accessing in browser)\n"
+                       "3. Check if you're behind a firewall or proxy\n"
+                       "4. Try again in a few minutes in case of temporary network issues")
+            
+            return GitPermissionError(
+                error_type="NETWORK_ERROR",
+                message="Network connection failed",
+                stderr=stderr,
+                solution=solution
+            )
+        
+        # Authentication failed
+        if any(phrase in stderr_lower for phrase in [
+            'authentication failed', 'invalid username or password',
+            'bad credentials', 'unauthorized'
+        ]):
+            return GitPermissionError(
+                error_type="AUTHENTICATION_FAILED",
+                message="Authentication failed",
+                stderr=stderr,
+                solution="Please check your username and password, or use a valid personal access token"
+            )
+        
+        # Branch not found
+        if any(phrase in stderr_lower for phrase in [
+            'remote branch', 'does not exist', "couldn't find remote ref"
+        ]):
+            return GitPermissionError(
+                error_type="BRANCH_NOT_FOUND",
+                message="Specified branch does not exist",
+                stderr=stderr,
+                solution="Please check if the branch name is correct or select another available branch"
+            )
+        
+        # Timeout errors
+        if 'timeout' in stderr_lower:
+            return GitPermissionError(
+                error_type="TIMEOUT",
+                message="Operation timed out",
+                stderr=stderr,
+                solution="Repository may be large or network is slow, please try again later"
+            )
+        
+        # Generic errors
+        return GitPermissionError(
+            error_type="UNKNOWN_ERROR",
+            message=f"Git operation failed: {stderr}",
+            stderr=stderr,
+            solution="Please check repository URL and network connection, or contact administrator"
+        )
+    
+    @staticmethod
+    def get_git_credential_for_url(repo_url: str, user_profile=None):
+        """
+        Get appropriate Git credential for the given repository URL.
+        
+        Args:
+            repo_url: Repository URL
+            user_profile: UserProfile instance (optional)
+            
+        Returns:
+            GitCredential instance or None
+        """
+        if not user_profile:
+            return None
+            
+        try:
+            from accounts.models import GitCredential
+            
+            # Determine provider from URL
+            provider = 'github'
+            if 'gitlab.com' in repo_url:
+                provider = 'gitlab'
+            elif 'bitbucket.org' in repo_url:
+                provider = 'bitbucket'
+            
+            # Try to find matching credential
+            credential = GitCredential.objects.filter(
+                user_profile=user_profile,
+                provider=provider,
+                is_active=True
+            ).first()
+            
+            return credential
+        except Exception:
+            return None
+    
+    @staticmethod
+    def clone_repository(repo_url: str, target_dir: str, branch: Optional[str] = None, user_profile=None) -> Dict:
         """
         Clone a Git repository to the target directory.
         
@@ -22,19 +213,34 @@ class GitUtils:
             repo_url: Git repository URL
             target_dir: Target directory path
             branch: Specific branch to clone (optional)
+            user_profile: UserProfile for authentication (optional)
             
         Returns:
             Dictionary with clone result
+            
+        Raises:
+            GitPermissionError: For specific Git permission/access issues
+            ValidationError: For general validation errors
         """
         try:
             # Ensure target directory exists
             os.makedirs(target_dir, exist_ok=True)
             
+            # Try to get authenticated URL if user profile is provided
+            auth_url = repo_url
+            credential = GitUtils.get_git_credential_for_url(repo_url, user_profile)
+            if credential:
+                try:
+                    auth_url = credential.get_auth_url(repo_url)
+                except Exception:
+                    # If credential fails, fall back to original URL
+                    auth_url = repo_url
+            
             # Prepare git clone command
             cmd = ['git', 'clone']
             if branch:
                 cmd.extend(['-b', branch])
-            cmd.extend([repo_url, target_dir])
+            cmd.extend([auth_url, target_dir])
             
             # Execute git clone
             result = subprocess.run(
@@ -45,16 +251,25 @@ class GitUtils:
             )
             
             if result.returncode != 0:
-                raise ValidationError(f"Git clone failed: {result.stderr}")
+                # Analyze specific error type
+                git_error = GitUtils._analyze_git_error(result.stderr, repo_url)
+                raise git_error
             
             return {
                 'success': True,
                 'message': f'Repository cloned successfully to {target_dir}',
-                'path': target_dir
+                'path': target_dir,
+                'used_authentication': credential is not None
             }
             
         except subprocess.TimeoutExpired:
-            raise ValidationError("Git clone operation timed out")
+            raise GitPermissionError(
+                error_type="TIMEOUT",
+                message="Git clone operation timed out",
+                solution="Repository may be large or network is slow, please try again later"
+            )
+        except GitPermissionError:
+            raise  # Re-raise GitPermissionError as-is
         except Exception as e:
             raise ValidationError(f"Failed to clone repository: {str(e)}")
     
@@ -301,20 +516,35 @@ class GitUtils:
             raise ValidationError(f"Failed to checkout branch: {str(e)}")
     
     @staticmethod
-    def validate_repository_access(repo_url: str) -> Dict:
+    def validate_repository_access(repo_url: str, user_profile=None) -> Dict:
         """
         Lightweight validation of repository access without cloning.
         Uses git ls-remote to check repository accessibility and get branch info.
         
         Args:
             repo_url: Repository URL to validate
+            user_profile: UserProfile for authentication (optional)
             
         Returns:
             Dictionary with validation result and basic info
+            
+        Raises:
+            GitPermissionError: For specific Git permission/access issues
+            ValidationError: For general validation errors
         """
         try:
+            # Try to get authenticated URL if user profile is provided
+            auth_url = repo_url
+            credential = GitUtils.get_git_credential_for_url(repo_url, user_profile)
+            if credential:
+                try:
+                    auth_url = credential.get_auth_url(repo_url)
+                except Exception:
+                    # If credential fails, fall back to original URL
+                    auth_url = repo_url
+            
             # Use git ls-remote to get remote references without cloning
-            cmd = ['git', 'ls-remote', '--heads', repo_url]
+            cmd = ['git', 'ls-remote', '--heads', auth_url]
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -323,7 +553,9 @@ class GitUtils:
             )
             
             if result.returncode != 0:
-                raise ValidationError(f"Repository not accessible: {result.stderr}")
+                # Analyze specific error type
+                git_error = GitUtils._analyze_git_error(result.stderr, repo_url)
+                raise git_error
             
             # Parse branch information from ls-remote output
             branches = []
@@ -354,11 +586,18 @@ class GitUtils:
             return {
                 'accessible': True,
                 'branches': branches,
-                'default_branch': default_branch
+                'default_branch': default_branch,
+                'used_authentication': credential is not None
             }
             
         except subprocess.TimeoutExpired:
-            raise ValidationError("Repository validation timeout - repository may be inaccessible")
+            raise GitPermissionError(
+                error_type="TIMEOUT",
+                message="Repository validation timeout - repository may be inaccessible",
+                solution="Please check your network connection or try again later"
+            )
+        except GitPermissionError:
+            raise  # Re-raise GitPermissionError as-is
         except Exception as e:
             raise ValidationError(f"Repository validation failed: {str(e)}")
 
