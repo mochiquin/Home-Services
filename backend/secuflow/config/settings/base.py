@@ -173,9 +173,7 @@ TNM_JAR_PATH = os.getenv('TNM_JAR_PATH', None)
 TNM_RUN_SCRIPT = os.getenv('TNM_RUN_SCRIPT', None)
 TNM_WORK_DIR = os.getenv('TNM_WORK_DIR', None)
 TNM_TIMEOUT = int(os.getenv('TNM_TIMEOUT', '1800'))
-TNM_SQS_QUEUE_URL = None
-TNM_S3_BUCKET = None
-AWS_REGION = None
-AWS_ENDPOINT_URL = None
+TNM_REPOSITORIES_DIR = os.getenv('TNM_REPOSITORIES_DIR', '/app/tnm_repositories')
+TNM_OUTPUT_DIR = os.getenv('TNM_OUTPUT_DIR', '/app/tnm_output')
 
 

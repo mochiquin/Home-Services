@@ -10,7 +10,7 @@ from .models import (
     FunctionalClass, ContributorClassification
 )
 from projects.models import Project
-from tnm_integration.models import TnmJob
+# from tnm_integration.models import TnmJob  # Removed - TNM jobs no longer supported
 from contributors.models import Contributor, CodeFile
 from rest_framework import serializers
 from common.response import ApiResponse

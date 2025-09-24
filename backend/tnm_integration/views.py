@@ -1,20 +1,12 @@
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
 import os
 import shutil
 from .services import TnmService
 from common.git_utils import GitUtils
 from projects.models import Project, ProjectMember
-from .models import TnmJob
-from .serializers import TnmJobCreateSerializer, TnmJobSerializer
 from common.response import ApiResponse
-from accounts.models import User, UserProfile
-import boto3
-import json
 import logging
 
 
@@ -275,41 +267,5 @@ def run_tnm(request):
 				pass
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_job(request):
-	serializer = TnmJobCreateSerializer(data=request.data)
-	if not serializer.is_valid():
-		return ApiResponse.error('invalid payload', data=serializer.errors)
-	job: TnmJob = serializer.save(created_by=request.user, status='queued')
-	# enqueue to SQS
-	sqs_url = getattr(settings, 'TNM_SQS_QUEUE_URL', None)
-	if not sqs_url:
-		return ApiResponse.internal_error('TNM_SQS_QUEUE_URL not configured')
-	client = boto3.client(
-		'sqs',
-		region_name=getattr(settings, 'AWS_REGION', None),
-		endpoint_url=getattr(settings, 'AWS_ENDPOINT_URL', None),
-	)
-	msg = {
-		'job_id': job.id,
-		'repo_url': job.repo_url,
-		'branch': job.branch,
-		'command': job.command,
-		'options': job.options,
-		'args': job.args,
-	}
-	client.send_message(QueueUrl=sqs_url, MessageBody=json.dumps(msg))
-	return ApiResponse.created({'id': job.id})
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def job_detail(request, pk: int):
-	try:
-		job = TnmJob.objects.get(pk=pk)
-	except TnmJob.DoesNotExist:
-		return ApiResponse.not_found('not found')
-	return ApiResponse.success(TnmJobSerializer(job).data)
 
 
