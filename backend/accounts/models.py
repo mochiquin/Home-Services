@@ -1,14 +1,21 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
+from django.core.validators import RegexValidator
 from cryptography.fernet import Fernet
 import uuid
 import base64
 
 
 class User(AbstractUser):
-    """Custom user model with UUID primary key."""
+    """Custom user model with UUID primary key and password strength requirements."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    # Password strength configuration
+    password_min_length = models.IntegerField(default=8, help_text="Minimum password length")
+    require_uppercase = models.BooleanField(default=True, help_text="Require uppercase letter")
+    require_lowercase = models.BooleanField(default=True, help_text="Require lowercase letter") 
+    require_numbers = models.BooleanField(default=True, help_text="Require numbers")
 
     class Meta:
         db_table = 'auth_user'
@@ -19,6 +26,7 @@ class UserProfile(models.Model):
 
     Stores additional attributes such as avatar and display name.
     """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         'accounts.User', 
         on_delete=models.CASCADE, 
@@ -51,6 +59,7 @@ class UserProfile(models.Model):
         auto_now=True, 
         verbose_name="Updated At"
     )
+    last_activity = models.DateTimeField(null=True, blank=True, help_text="Last user activity timestamp")
     selected_project = models.ForeignKey(
         'projects.Project', on_delete=models.SET_NULL, null=True, blank=True, related_name='selected_by_profiles'
     )
@@ -116,6 +125,14 @@ class GitCredential(models.Model):
     
     is_active = models.BooleanField(default=True)
     
+    # Enhanced fields for better credential management
+    description = models.CharField(max_length=200, blank=True, help_text="User-defined description for this credential")
+    expires_at = models.DateTimeField(null=True, blank=True, help_text="Credential expiration time")
+    last_used_at = models.DateTimeField(null=True, blank=True, help_text="Last time this credential was used")
+    scopes = models.JSONField(default=list, blank=True, help_text="Token permission scopes")
+    use_count = models.IntegerField(default=0, help_text="Number of times this credential has been used")
+    last_error = models.TextField(blank=True, help_text="Last error message when using this credential")
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -176,6 +193,30 @@ class GitCredential(models.Model):
         self.username = username
         self.encrypt_credential(private_key)
     
+    def is_expired(self):
+        """Check if credential is expired."""
+        if not self.expires_at:
+            return False
+        from django.utils import timezone
+        return timezone.now() > self.expires_at
+    
+    def mark_used(self, error_message=None):
+        """Mark credential as used and optionally record error."""
+        from django.utils import timezone
+        self.last_used_at = timezone.now()
+        self.use_count += 1
+        if error_message:
+            self.last_error = error_message
+        else:
+            self.last_error = ""
+        self.save(update_fields=['last_used_at', 'use_count', 'last_error'])
+    
+    def get_display_name(self):
+        """Get user-friendly display name for this credential."""
+        if self.description:
+            return self.description
+        return f"{self.provider} {self.get_credential_type_display()}"
+
     def get_auth_url(self, repo_url):
         """Get authenticated URL for repository access."""
         if self.credential_type == self.CredentialType.HTTPS_TOKEN:

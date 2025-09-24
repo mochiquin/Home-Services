@@ -10,8 +10,6 @@ urlpatterns = [
     
     # Analysis modules
     path('contributors/', include('contributors.urls')),
-    path('coordination/', include('coordination.urls')),
-    path('risks/', include('risks.urls')),
 ]
 
 

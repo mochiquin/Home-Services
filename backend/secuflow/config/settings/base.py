@@ -25,8 +25,6 @@ INSTALLED_APPS = [
     'common',
     'projects',
     'contributors',
-    'coordination',
-    'risks',
     'tnm_integration',
 ]
 
