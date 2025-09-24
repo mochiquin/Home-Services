@@ -7,9 +7,13 @@ from django.utils import timezone
 from django.core.exceptions import ValidationError
 from .models import Contributor, ProjectContributor, CodeFile, Commit
 from projects.models import Project
+from .enums import FunctionalRole
+from .services import TNMDataAnalysisService
 from rest_framework import serializers
 from common.response import ApiResponse
 from common.pagination import DefaultPagination
+import os
+from django.conf import settings
 
 # Initialize logger for contributors API
 logger = logging.getLogger(__name__)
@@ -19,12 +23,13 @@ class ContributorSerializer(serializers.ModelSerializer):
     """Serializer for Contributor model"""
     projects_count = serializers.SerializerMethodField()
     total_commits = serializers.SerializerMethodField()
+    display_name = serializers.ReadOnlyField()
     
     class Meta:
         model = Contributor
-        fields = ['id', 'github_login', 'email', 'affiliation', 'created_at', 'updated_at', 
-                 'projects_count', 'total_commits']
-        read_only_fields = ['id', 'created_at', 'updated_at', 'projects_count', 'total_commits']
+        fields = ['id', 'github_login', 'email', 'full_name', 'display_name',
+                 'affiliation', 'created_at', 'updated_at', 'projects_count', 'total_commits']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'projects_count', 'total_commits', 'display_name']
     
     def get_projects_count(self, obj):
         return obj.projects.count()
@@ -466,4 +471,252 @@ def project_contributor_analysis(request, project_id):
         return ApiResponse.internal_error(
             error_message="Failed to retrieve contributor analysis",
             error_code="PROJECT_ANALYSIS_ERROR"
+        )
+
+
+# New TNM Classification Serializers
+class ProjectContributorClassificationSerializer(serializers.ModelSerializer):
+    """Serializer for updating contributor role classifications."""
+    
+    contributor_name = serializers.CharField(source='contributor.github_login', read_only=True)
+    contributor_email = serializers.CharField(source='contributor.email', read_only=True)
+    activity_level = serializers.SerializerMethodField()
+    functional_role_display = serializers.CharField(source='get_functional_role_display', read_only=True)
+    
+    class Meta:
+        model = ProjectContributor
+        fields = [
+            'id', 'contributor_name', 'contributor_email', 'total_modifications',
+            'files_modified', 'functional_role', 'functional_role_display', 
+            'is_core_contributor', 'role_confidence', 'activity_level'
+        ]
+        read_only_fields = [
+            'id', 'contributor_name', 'contributor_email', 'total_modifications',
+            'files_modified', 'role_confidence'
+        ]
+    
+    def get_activity_level(self, obj):
+        return obj.activity_level
+
+
+class FunctionalRoleChoiceSerializer(serializers.Serializer):
+    """Serializer for functional role choices."""
+    value = serializers.CharField()
+    label = serializers.CharField()
+
+
+# New API Endpoints for TNM Analysis and Role Classification
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def analyze_tnm_contributors(request, project_id):
+    """
+    Analyze TNM output data and populate contributor information.
+    
+    POST /api/contributors/projects/{project_id}/analyze_tnm/
+    Body: {
+        "tnm_output_dir": "/path/to/tnm/output", (optional, auto-detected)
+        "branch": "main" (optional)
+    }
+    """
+    try:
+        # Get project and verify permissions
+        project = Project.objects.get(id=project_id)
+        user_profile = request.user.profile
+        
+        # Check permissions - only project members can analyze
+        if not (project.owner_profile == user_profile or 
+                project.members.filter(profile=user_profile).exists()):
+            return ApiResponse.forbidden("Only project members can analyze contributors")
+        
+        # Get TNM output directory
+        payload = request.data or {}
+        tnm_output_dir = payload.get('tnm_output_dir')
+        branch = payload.get('branch', 'unknown')
+        
+        # Auto-detect TNM output directory if not provided
+        if not tnm_output_dir:
+            repos_root = getattr(settings, 'TNM_OUTPUT_DIR', '/app/tnm_output')
+            tnm_output_dir = f"{repos_root}/project_{project.id}_{branch.replace('/', '_')}"
+        
+        if not os.path.exists(tnm_output_dir):
+            return ApiResponse.error(
+                error_message=f"TNM output directory not found: {tnm_output_dir}",
+                error_code="TNM_OUTPUT_NOT_FOUND"
+            )
+        
+        # Analyze TNM data
+        analysis_result = TNMDataAnalysisService.analyze_assignment_matrix(
+            project, tnm_output_dir, branch
+        )
+        
+        logger.info(f"TNM contributor analysis completed for project {project.id}", extra={
+            'project_id': project_id,
+            'user_id': request.user.id,
+            'contributors_processed': analysis_result['total_contributors']
+        })
+        
+        return ApiResponse.success(
+            data=analysis_result,
+            message=f"Analyzed {analysis_result['total_contributors']} contributors from TNM data"
+        )
+        
+    except Project.DoesNotExist:
+        return ApiResponse.not_found("Project not found")
+    except Exception as e:
+        logger.error(f"TNM contributor analysis failed: {e}", extra={
+            'project_id': project_id,
+            'user_id': request.user.id
+        }, exc_info=True)
+        return ApiResponse.internal_error(
+            error_message="Failed to analyze TNM contributor data",
+            error_code="TNM_ANALYSIS_ERROR"
+        )
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def project_contributors_classification(request, project_id):
+    """
+    Get or update contributor role classifications for MC-STC analysis.
+    
+    GET /api/contributors/projects/{project_id}/classification/
+    Query params: page, page_size, role, activity_level, search
+    
+    PATCH /api/contributors/projects/{project_id}/classification/
+    Body: [
+        {
+            "id": 1,
+            "functional_role": "core_developer",
+            "is_core_contributor": true
+        },
+        ...
+    ]
+    """
+    try:
+        # Get project and verify permissions
+        project = Project.objects.get(id=project_id)
+        user_profile = request.user.profile
+        
+        # Check permissions
+        if not (project.owner_profile == user_profile or 
+                project.members.filter(profile=user_profile).exists()):
+            return ApiResponse.forbidden("Only project members can access contributor classifications")
+        
+        if request.method == 'GET':
+            # Get contributors with pagination and filtering
+            queryset = ProjectContributor.objects.filter(project=project).select_related('contributor')
+            
+            # Apply filters
+            role = request.GET.get('role')
+            if role:
+                queryset = queryset.filter(functional_role=role)
+            
+            activity_level = request.GET.get('activity_level')
+            if activity_level:
+                if activity_level == 'high':
+                    queryset = queryset.filter(total_modifications__gte=1000)
+                elif activity_level == 'medium':
+                    queryset = queryset.filter(total_modifications__gte=100, total_modifications__lt=1000)
+                elif activity_level == 'low':
+                    queryset = queryset.filter(total_modifications__gte=10, total_modifications__lt=100)
+                elif activity_level == 'minimal':
+                    queryset = queryset.filter(total_modifications__lt=10)
+            
+            search = request.GET.get('search')
+            if search:
+                queryset = queryset.filter(
+                    Q(contributor__github_login__icontains=search) |
+                    Q(contributor__email__icontains=search)
+                )
+            
+            # Order by total modifications descending
+            queryset = queryset.order_by('-total_modifications')
+            
+            # Apply pagination
+            paginator = DefaultPagination()
+            page = paginator.paginate_queryset(queryset, request)
+            
+            serializer = ProjectContributorClassificationSerializer(page, many=True)
+            
+            return paginator.get_paginated_response(
+                serializer.data,
+                message=f"Retrieved {len(serializer.data)} contributors for classification"
+            )
+        
+        elif request.method == 'PATCH':
+            # Batch update contributor classifications
+            updates = request.data if isinstance(request.data, list) else [request.data]
+            updated_count = 0
+            
+            for update in updates:
+                contributor_id = update.get('id')
+                if not contributor_id:
+                    continue
+                
+                try:
+                    contributor = ProjectContributor.objects.get(
+                        id=contributor_id, 
+                        project=project
+                    )
+                    
+                    # Update fields
+                    if 'functional_role' in update:
+                        contributor.functional_role = update['functional_role']
+                    if 'is_core_contributor' in update:
+                        contributor.is_core_contributor = update['is_core_contributor']
+                    
+                    contributor.save(update_fields=['functional_role', 'is_core_contributor'])
+                    updated_count += 1
+                    
+                except ProjectContributor.DoesNotExist:
+                    logger.warning(f"Contributor {contributor_id} not found for project {project_id}")
+                    continue
+            
+            logger.info(f"Updated {updated_count} contributor classifications", extra={
+                'project_id': project_id,
+                'user_id': request.user.id,
+                'updated_count': updated_count
+            })
+            
+            return ApiResponse.success(
+                data={'updated_count': updated_count},
+                message=f"Updated {updated_count} contributor classifications"
+            )
+        
+    except Project.DoesNotExist:
+        return ApiResponse.not_found("Project not found")
+    except Exception as e:
+        logger.error(f"Contributor classification operation failed: {e}", extra={
+            'project_id': project_id,
+            'user_id': request.user.id,
+            'method': request.method
+        }, exc_info=True)
+        return ApiResponse.internal_error(
+            error_message="Failed to process contributor classifications",
+            error_code="CLASSIFICATION_ERROR"
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def functional_role_choices(request):
+    """
+    Get available functional role choices for contributor classification.
+    
+    GET /api/contributors/functional-role-choices/
+    """
+    try:
+        choices = FunctionalRole.get_choices_dict()
+        
+        return ApiResponse.success(
+            data={'choices': choices},
+            message="Retrieved functional role choices"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to get functional role choices: {e}", exc_info=True)
+        return ApiResponse.internal_error(
+            error_message="Failed to retrieve role choices",
+            error_code="ROLE_CHOICES_ERROR"
         )

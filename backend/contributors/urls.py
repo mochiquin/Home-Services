@@ -17,4 +17,9 @@ urlpatterns = [
     # Additional function-based views
     path('stats/', views.contributor_stats, name='contributor-stats'),
     path('projects/<int:project_id>/analysis/', views.project_contributor_analysis, name='project-contributor-analysis'),
+    
+    # TNM Analysis and Classification APIs
+    path('projects/<uuid:project_id>/analyze_tnm/', views.analyze_tnm_contributors, name='analyze-tnm-contributors'),
+    path('projects/<uuid:project_id>/classification/', views.project_contributors_classification, name='project-contributors-classification'),
+    path('functional-role-choices/', views.functional_role_choices, name='functional-role-choices'),
 ]
