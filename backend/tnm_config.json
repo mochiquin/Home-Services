@@ -2,44 +2,21 @@
   "output_directory": "/app/tnm_output",
   "repository_directory": "/app/tnm_repositories",
   "default_options": {
-    "num_threads": 4,
+    "num_threads": 2,
     "id_to_user": "/app/tnm_output/idToUser.json",
     "id_to_file": "/app/tnm_output/idToFile.json"
   },
   "miners": {
-    "FilesOwnershipMiner": {
-      "developer_knowledge": "/app/tnm_output/DeveloperKnowledge.json",
-      "files_ownership": "/app/tnm_output/FilesOwnership.json",
-      "potential_ownership": "/app/tnm_output/PotentialAuthorship.json"
-    },
     "AssignmentMatrixMiner": {
       "assignment_matrix": "/app/tnm_output/AssignmentMatrix.json"
     },
     "FileDependencyMatrixMiner": {
       "file_dependency_matrix": "/app/tnm_output/FileDependencyMatrix.json"
-    },
-    "CommitInfluenceGraphMiner": {
-      "commit_influence_graph": "/app/tnm_output/CommitInfluenceGraph.json"
-    },
-    "WorkTimeMiner": {
-      "work_time_data": "/app/tnm_output/WorkTimeData.json"
-    },
-    "CoEditNetworksMiner": {
-      "co_edit_networks": "/app/tnm_output/CoEditNetworks.json"
-    },
-    "ComplexityCodeChangesMiner": {
-      "complexity_data": "/app/tnm_output/ComplexityData.json"
     }
   },
   "calculations": {
-    "PageRankCalculation": {
-      "pagerank_result": "/app/tnm_output/PageRankResult.json"
-    },
     "CoordinationNeedsMatrixCalculation": {
       "coordination_matrix": "/app/tnm_output/CoordinationMatrix.json"
-    },
-    "MirrorCongruenceCalculation": {
-      "congruence_result": "/app/tnm_output/CongruenceResult.json"
     }
   }
 }

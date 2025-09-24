@@ -19,20 +19,23 @@ def run_tnm(request):
 		'has_data': bool(request.data)
 	})
 	"""
-	Trigger TNM CLI to analyze a Git repository.
+	Extract basic data for STC/MC-STC coordination calculations.
 	Request JSON:
 	{
-		"command": "AssignmentMatrixMiner",
-		"options": ["--repository", "./repo/.git", "main"],
-		"args": []
+		"data_type": "assignment_matrix" | "file_dependency" | "coordination_minimal",
+		"safe_mode": true
 	}
 	"""
 	payload = request.data or {}
-	command = payload.get('command')
-	options = payload.get('options', [])
-	args = payload.get('args', [])
-	# Default behavior: if no explicit command is provided, run the minimal preset
-	preset = payload.get('preset') or (None if command else 'basic')
+	data_type = payload.get('data_type', 'coordination_minimal')
+	
+	# Validate data_type
+	allowed_types = ['assignment_matrix', 'file_dependency', 'coordination_minimal']
+	if data_type not in allowed_types:
+		return ApiResponse.error(
+			error_message=f'Invalid data_type. Must be one of: {", ".join(allowed_types)}',
+			error_code="INVALID_DATA_TYPE"
+		)
 
 	# Authorization and project lookup
 	project_id = payload.get('project_id')
@@ -58,8 +61,11 @@ def run_tnm(request):
 	safe_mode = payload.get('safe_mode')
 	safe_mode = True if safe_mode is None else bool(safe_mode)
 
+	# Initialize options as empty list
+	options = []
+
 	# Convenience: allow passing project and auto-build options
-	if project and not options:
+	if project:
 		# Decide path prefixes. Prefer explicit env/settings; otherwise fall back to container-standard paths
 		docker_mode = os.getenv('TNM_DOCKER_MODE', 'false').lower() == 'true'
 		if docker_mode:
@@ -98,9 +104,14 @@ def run_tnm(request):
 		# Append branch as the final arg
 		options += [branch]
 
-	if not command:
-		# Default to FilesOwnershipMiner when only project_id is provided
-		command = 'FilesOwnershipMiner'
+	# Map data types to TNM commands
+	command_mapping = {
+		'assignment_matrix': 'AssignmentMatrixMiner',
+		'file_dependency': 'FileDependencyMatrixMiner', 
+		'coordination_minimal': None  # Special case: run both essential miners
+	}
+	
+	command = command_mapping.get(data_type)
 
 	service = TnmService(
 		java_path=getattr(settings, 'TNM_JAVA_PATH', 'java'),
@@ -206,8 +217,8 @@ def run_tnm(request):
 			except Exception as e:
 				logger.exception(f"Error in _copy_outputs: {e}")
 
-		# Preset basic: run minimal miners for downstream calculations
-		if preset == 'basic':
+		# Handle coordination_minimal: run only essential STC/MC-STC miners
+		if data_type == 'coordination_minimal':
 			results = []
 			# Determine which repo path to use (temp safe_mode or original)
 			repo_arg = None
@@ -218,7 +229,10 @@ def run_tnm(request):
 			if not repo_arg:
 				repo_arg = repo_git_path
 			branch_arg = options[-1] if options else branch
-			for cmd in ['AssignmentMatrixMiner', 'FileDependencyMatrixMiner', 'CoEditNetworksMiner']:
+			
+			# Only run essential miners for STC/MC-STC calculations
+			essential_miners = ['AssignmentMatrixMiner', 'FileDependencyMatrixMiner']
+			for cmd in essential_miners:
 				proc = service.run_cli(
 					cmd,
 					['--repository', repo_arg],
@@ -231,31 +245,40 @@ def run_tnm(request):
 					'returncode': proc.returncode,
 					'stdout': proc.stdout,
 					'stderr': proc.stderr,
+					'data_type': cmd.replace('Miner', '').lower()
 				})
 			_copy_outputs()
 			ok = all(r['returncode'] == 0 for r in results)
-			return ApiResponse.success({'runs': results}) if ok else ApiResponse.error('One or more miners failed', data={'runs': results})
+			return ApiResponse.success({
+				'data_type': data_type,
+				'runs': results,
+				'essential_data_extracted': ok
+			}) if ok else ApiResponse.error('Essential data extraction failed', data={'runs': results})
 
-		# Single-command path
-		work_dir = project_output_root if project else getattr(settings, 'TNM_WORK_DIR', None)
-		proc = service.run_cli(
-			command,
-			options,
-			args,
-			cwd=work_dir,
-			timeout=getattr(settings, 'TNM_TIMEOUT', None)
-		)
-		_copy_outputs()
-		data = {
-			'command': proc.args,
-			'returncode': proc.returncode,
-			'stdout': proc.stdout,
-			'stderr': proc.stderr,
-		}
-		if proc.returncode == 0:
-			return ApiResponse.success(data=data)
+		# Single data type extraction path
+		if command:
+			work_dir = project_output_root if project else getattr(settings, 'TNM_WORK_DIR', None)
+			proc = service.run_cli(
+				command,
+				options,
+				[],  # No additional args for data extraction
+				cwd=work_dir,
+				timeout=getattr(settings, 'TNM_TIMEOUT', None)
+			)
+			_copy_outputs()
+			data = {
+				'data_type': data_type,
+				'command': proc.args,
+				'returncode': proc.returncode,
+				'stdout': proc.stdout,
+				'stderr': proc.stderr,
+			}
+			if proc.returncode == 0:
+				return ApiResponse.success(data=data)
+			else:
+				return ApiResponse.error(f'TNM {data_type} extraction failed', data=data)
 		else:
-			return ApiResponse.error('TNM returned non-zero code', data=data)
+			return ApiResponse.error(f'Unknown data_type: {data_type}')
 	except Exception as e:
 		logger.exception('TNM execution failed')
 		return ApiResponse.error('TNM execution failed', data={'detail': str(e)})
