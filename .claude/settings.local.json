@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)",
+      "Bash(python manage.py startapp:*)",
+      "Bash(for app in bookings payments reviews notifications)",
+      "Bash(do mkdir -p $app/migrations)",
+      "Bash(done)",
+      "Bash(python manage.py:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker rm:*)",
+      "Bash(find:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

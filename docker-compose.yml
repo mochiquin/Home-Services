@@ -1,0 +1,84 @@
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: secuflow-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-secuflow}
+      MYSQL_USER: ${MYSQL_USER:-secuflow}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-secuflow123}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - secuflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: secuflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - secuflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 20s
+      retries: 10
+
+  # Django Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: homeservices-backend
+    environment:
+      - DATABASE_TYPE=mysql
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-secuflow}
+      - MYSQL_USER=${MYSQL_USER:-secuflow}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-secuflow123}
+      - SECRET_KEY=${SECRET_KEY:-django-insecure-change-me}
+      - DEBUG=${DEBUG:-True}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source code for development
+      - ${BACKEND_VOLUME:-./backend:/app}
+    networks:
+      - secuflow-network
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "manage.py", "check", "--deploy"]
+      timeout: 30s
+      retries: 3
+      interval: 30s
+
+
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  secuflow-network:
+    driver: bridge

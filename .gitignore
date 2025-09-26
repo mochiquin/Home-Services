@@ -1,24 +1,96 @@
-# Nestjs specific
-/dist
-/node_modules
-/build
-/tmp
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# Git
+*.orig
+
+# Python / Django
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.venv/
+venv/
+ENV/
+.env
+.env.*
+.db.sqlite3
+backend/db.sqlite3
+media/
+staticfiles/
+
+# Django migrations caches
+**/migrations/__pycache__/
+
+# Node / Next.js / pnpm
+node_modules/
+.pnp.cjs
+.pnp.loader.mjs
+.pnpm-store/
+.next/
+.next-static/
+.next-cache/
+.next-standalone/
+**/.next/
+**/dist/
+**/build/
+
+# Gradle caches
+.gradle/
+**/.gradle/
+
+# Env files (frontend)
+frontend/.env.local
+frontend/.env.*.local
+
+# SSH keys and configs (security)
+.ssh/
+**/id_rsa
+**/id_rsa.pub
+**/id_ed25519
+**/id_ed25519.pub
+**/*.pem
+**/*.key
+**/known_hosts
 
 # Logs
-logs
+logs/
 *.log
 npm-debug.log*
-pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-lerna-debug.log*
+pnpm-debug.log*
 
-# dotenv environment variable files
-.env
-.env.development
-.env.test
-.env.production
+# Coverage
+coverage/
+.nyc_output/
 
-# temp directory
-.temp
-.tmp
+Documentation (keep tracked, comment out to include)
+README_CN.md
+DATABASE_DESIGN.md
+API文档.md
+
+# Postman / API Testing
+Postman_Environment.json
+Postman_Testing_Guide.md
+Postman测试指南.md
+Secuflow_API_Collection.json
+
+# TNM Analysis Data
+backend/tnm_output/
+backend/tnm_repositories/
+
+# Binary artifacts
+backend/tnm-cli.jar
+/ssrn-4640248.pdf
+
+# Misc
+*.swp
+*.swo
+README_OLD.md
