@@ -15,6 +15,7 @@ from .serializers import (
 )
 from .services import UserProfileService, UserService
 from common.response import ApiResponse
+from common.decorators import api_exception_handler, log_api_call
 
 # Initialize logger for accounts API
 logger = logging.getLogger(__name__)
@@ -22,174 +23,70 @@ logger = logging.getLogger(__name__)
 # Authentication Views
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@api_exception_handler
+@log_api_call
 def login_view(request):
     """
-    User login endpoint using service layer.
+    User login endpoint - simplified with global exception handling.
     Accepts email/password and returns JWT tokens with user information.
     """
     email = request.data.get('email')
-    logger.info("User login attempt", extra={
-        'email': email,
-        'ip_address': request.META.get('REMOTE_ADDR'),
-        'user_agent': request.META.get('HTTP_USER_AGENT', '')
-    })
-    
-    try:
-        # Use service layer for authentication
-        auth_result = UserService.authenticate_user(email, request.data.get('password'))
-        
-        # Generate tokens
-        tokens = UserService.generate_tokens(auth_result['user'])
-        
-        logger.info("User login successful", extra={
-            'user_id': auth_result['user'].id,
-            'email': email,
-            'ip_address': request.META.get('REMOTE_ADDR')
-        })
-        
-        return ApiResponse.success(
-            data={
-                'refresh': tokens['refresh'],
-                'access': tokens['access'],
-                'user': UserSerializer(auth_result['user']).data
-            },
-            message=auth_result['message']
-        )
-        
-    except ValidationError as e:
-        logger.warning("User login failed - invalid credentials", extra={
-            'email': email,
-            'error': str(e),
-            'ip_address': request.META.get('REMOTE_ADDR')
-        })
-        return ApiResponse.unauthorized(
-            error_message=str(e),
-            error_code="INVALID_CREDENTIALS"
-        )
-    except Exception as e:
-        logger.error("User login failed - system error", extra={
-            'email': email,
-            'error': str(e),
-            'ip_address': request.META.get('REMOTE_ADDR')
-        }, exc_info=True)
-        return ApiResponse.internal_error(
-            error_message="Login failed",
-            error_code="LOGIN_ERROR"
-        )
+
+    # Use service layer for authentication
+    auth_result = UserService.authenticate_user(email, request.data.get('password'))
+
+    # Generate tokens
+    tokens = UserService.generate_tokens(auth_result['user'])
+
+    return ApiResponse.success(
+        data={
+            'refresh': tokens['refresh'],
+            'access': tokens['access'],
+            'user': UserSerializer(auth_result['user']).data
+        },
+        message=auth_result['message']
+    )
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@api_exception_handler
+@log_api_call
 def register_view(request):
     """
-    User registration endpoint using service layer.
+    User registration endpoint - simplified with global exception handling.
     Creates a new user account and returns JWT tokens.
     """
-    email = request.data.get('email')
-    username = request.data.get('username')
-    logger.info("User registration attempt", extra={
-        'email': email,
-        'username': username,
-        'ip_address': request.META.get('REMOTE_ADDR'),
-        'user_agent': request.META.get('HTTP_USER_AGENT', '')
-    })
-    
-    try:
-        # Use service layer for registration
-        result = UserService.register_user(request.data)
-        
-        logger.info("User registration successful", extra={
-            'user_id': result['user'].id,
-            'email': email,
-            'username': username,
-            'ip_address': request.META.get('REMOTE_ADDR')
-        })
-        
-        return ApiResponse.created(
-            data={
-                'refresh': result['tokens']['refresh'],
-                'access': result['tokens']['access'],
-                'user': UserSerializer(result['user']).data
-            },
-            message=result['message']
-        )
-        
-    except ValidationError as e:
-        logger.warning("User registration failed - validation error", extra={
-            'email': email,
-            'username': username,
-            'error': str(e),
-            'ip_address': request.META.get('REMOTE_ADDR')
-        })
-        return ApiResponse.error(
-            error_message=str(e),
-            error_code="REGISTRATION_ERROR"
-        )
-    except Exception as e:
-        logger.error("User registration failed - system error", extra={
-            'email': email,
-            'username': username,
-            'error': str(e),
-            'ip_address': request.META.get('REMOTE_ADDR')
-        }, exc_info=True)
-        return ApiResponse.internal_error(
-            error_message="Registration failed",
-            error_code="REGISTRATION_ERROR"
-        )
+    # Use service layer for registration
+    result = UserService.register_user(request.data)
+
+    return ApiResponse.created(
+        data={
+            'refresh': result['tokens']['refresh'],
+            'access': result['tokens']['access'],
+            'user': UserSerializer(result['user']).data
+        },
+        message=result['message']
+    )
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@api_exception_handler
+@log_api_call
 def logout_view(request):
     """
-    User logout endpoint using service layer.
+    User logout endpoint - simplified with global exception handling.
     Blacklists the provided refresh token.
     """
-    user_id = request.user.id if request.user else None
-    logger.info("User logout attempt", extra={
-        'user_id': user_id,
-        'ip_address': request.META.get('REMOTE_ADDR')
-    })
-    
-    try:
-        refresh_token = request.data.get('refresh')
-        if not refresh_token:
-            logger.warning("Logout failed - missing refresh token", extra={
-                'user_id': user_id
-            })
-            return ApiResponse.error(
-                error_message="Refresh token is required",
-                error_code="MISSING_TOKEN"
-            )
-        
-        # Use service layer for logout
-        result = UserService.logout_user(refresh_token)
-        
-        logger.info("User logout successful", extra={
-            'user_id': user_id,
-            'ip_address': request.META.get('REMOTE_ADDR')
-        })
-        
-        return ApiResponse.success(
-            message=result['message']
-        )
-        
-    except ValidationError as e:
-        logger.warning("User logout failed - validation error", extra={
-            'user_id': user_id,
-            'error': str(e)
-        })
-        return ApiResponse.error(
-            error_message=str(e),
-            error_code="LOGOUT_ERROR"
-        )
-    except Exception as e:
-        logger.error("User logout failed - system error", extra={
-            'user_id': user_id,
-            'error': str(e)
-        }, exc_info=True)
-        return ApiResponse.internal_error(
-            error_message="Logout failed",
-            error_code="LOGOUT_ERROR"
-        )
+    refresh_token = request.data.get('refresh')
+    if not refresh_token:
+        raise ValidationError("Refresh token is required")
+
+    # Use service layer for logout
+    result = UserService.logout_user(refresh_token)
+
+    return ApiResponse.success(
+        message=result['message']
+    )
 
 class UserViewSet(viewsets.ModelViewSet):
     """

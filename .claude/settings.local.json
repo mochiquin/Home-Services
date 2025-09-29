@@ -12,7 +12,8 @@
       "Bash(docker-compose:*)",
       "Bash(docker rm:*)",
       "Bash(find:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []
