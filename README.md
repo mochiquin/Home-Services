@@ -141,17 +141,37 @@ The backend consists of 7 main Django applications:
 
 ### API Endpoints
 
+#### 🔐 Authentication
 | Endpoint | Method | Description | Authentication |
 |----------|--------|-------------|---------------|
 | `/api/token/` | POST | Get JWT access/refresh tokens | ❌ |
 | `/api/token/refresh/` | POST | Refresh JWT token | ❌ |
-| `/api/auth/` | GET/POST | User authentication endpoints | ✅ |
-| `/api/services/` | GET | List all available services | ✅ |
-| `/api/providers/` | GET | List service providers | ✅ |
-| `/api/bookings/` | GET/POST | Manage bookings | ✅ |
-| `/api/payments/` | GET/POST | Payment operations | ✅ |
-| `/api/reviews/` | GET/POST | Reviews and ratings | ✅ |
-| `/api/notifications/` | GET | User notifications | ✅ |
+| `/api/auth/auth/login/` | POST | User login with email/password | ❌ |
+| `/api/auth/auth/register/` | POST | User registration | ❌ |
+| `/api/auth/auth/logout/` | POST | User logout (blacklist token) | ✅ |
+
+#### 🏠 Home Services
+| Endpoint | Method | Description | Authentication |
+|----------|--------|-------------|---------------|
+| `/api/services/categories/` | GET/POST | Service categories | ✅ |
+| `/api/services/categories/{id}/` | GET/PUT/DELETE | Category details | ✅ |
+| `/api/services/services/` | GET/POST | Available services | ✅ |
+| `/api/services/services/{id}/` | GET/PUT/DELETE | Service details | ✅ |
+| `/api/services/services/by_category/` | GET | Services by category | ✅ |
+
+#### 👤 User Management
+| Endpoint | Method | Description | Authentication |
+|----------|--------|-------------|---------------|
+| `/api/auth/users/` | GET | List users (staff only) | ✅ |
+| `/api/auth/users/me/` | GET | Current user profile | ✅ |
+| `/api/auth/users/update_profile/` | PUT/PATCH | Update user profile | ✅ |
+| `/api/auth/users/change_password/` | POST | Change password | ✅ |
+
+#### 🛠️ System
+| Endpoint | Method | Description | Authentication |
+|----------|--------|-------------|---------------|
+| `/api/auth/health/` | GET | API health check | ❌ |
+| `/api/auth/admin/stats/` | GET | User statistics (staff only) | ✅ |
 | `/admin/` | GET | Django admin interface | Admin only |
 
 ### Security Features
@@ -199,28 +219,47 @@ The backend consists of 7 main Django applications:
 
 ### ✅ Completed Features
 
+#### 🏗️ Infrastructure & Backend
 - **Docker Environment**: Multi-service Docker setup with MySQL, Redis, and Django
-- **Database Models**: Complete Django models for all core entities
-- **Authentication System**: JWT-based authentication with custom User model
-- **API Structure**: RESTful API endpoints with proper routing
+- **Database Models**: Complete Django models with UUID primary keys
+- **Authentication System**: JWT-based auth with login/register/logout
+- **KISS API Design**: Simplified, consistent RESTful endpoints
+- **Global Exception Handling**: Unified error handling across all APIs
 - **Admin Interface**: Django admin panel for content management
-- **Database Migrations**: All database tables created and configured
 
-### 🔄 Current Development Phase
+#### 🏠 Home Services Core
+- **Service Categories**: Create, read, update, delete service categories
+- **Services Management**: Full CRUD operations for home services
+- **User Profiles**: Extended user model with home service fields (phone, address)
+- **Data Consistency**: All entities use UUID for consistent identification
 
-- **API Implementation**: Building out CRUD operations for all endpoints
-- **Data Validation**: Adding comprehensive input validation and serializers
-- **Frontend Development**: React/Next.js application (planned)
-- **Testing Suite**: Unit and integration tests (planned)
-- **Documentation**: API documentation and usage guides
+#### 🔧 Code Quality
+- **KISS Principles**: Removed unnecessary abstractions and complexity
+- **Standard Django/DRF**: Uses framework best practices, not custom wrappers
+- **Clean Architecture**: Eliminated redundant Service layer abstractions
+- **Consistent Responses**: Standardized API response formats
 
-### 🎯 Next Steps
+### 🔄 Next Development Phase
 
-- Complete API endpoint implementations
-- Add comprehensive error handling
-- Implement file upload for service images
-- Create frontend React application
-- Set up automated testing
+#### 🚀 Immediate Priorities
+- **Service Providers**: Implement provider profiles and availability
+- **Booking System**: Create booking workflow and status management
+- **Payment Integration**: Add payment processing capabilities
+- **Reviews & Ratings**: User feedback and rating system
+
+#### 📱 Frontend Development
+- **React/Next.js Application**: Modern frontend interface
+- **Mobile Responsive**: Mobile-first design approach
+- **Real-time Features**: Live booking updates and notifications
+
+### 🎯 Upcoming Features
+
+- **Advanced Search**: Filter services by location, price, ratings
+- **File Uploads**: Service images and provider documents
+- **Notification System**: Email/SMS notifications for bookings
+- **Admin Dashboard**: Advanced analytics and reporting
+- **Automated Testing**: Comprehensive test suite
+- **API Documentation**: Interactive API docs with Swagger/OpenAPI
 - Deploy to production environment
 
 ## 🏃‍♂️ Development Workflow
