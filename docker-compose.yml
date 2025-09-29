@@ -2,19 +2,19 @@ services:
   # MySQL Database
   mysql:
     image: mysql:8.0
-    container_name: secuflow-mysql
+    container_name: homeservices-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-secuflow}
-      MYSQL_USER: ${MYSQL_USER:-secuflow}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-secuflow123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-homeservices}
+      MYSQL_USER: ${MYSQL_USER:-homeservices}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-homeservices123}
     ports:
       - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
-      - secuflow-network
+      - homeservices-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -24,13 +24,13 @@ services:
   # Redis Cache
   redis:
     image: redis:7-alpine
-    container_name: secuflow-redis
+    container_name: homeservices-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
-      - secuflow-network
+      - homeservices-network
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -47,9 +47,9 @@ services:
       - DATABASE_TYPE=mysql
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-secuflow}
-      - MYSQL_USER=${MYSQL_USER:-secuflow}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-secuflow123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-homeservices}
+      - MYSQL_USER=${MYSQL_USER:-homeservices}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-homeservices123}
       - SECRET_KEY=${SECRET_KEY:-django-insecure-change-me}
       - DEBUG=${DEBUG:-True}
       - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
@@ -60,7 +60,7 @@ services:
       # Mount source code for development
       - ${BACKEND_VOLUME:-./backend:/app}
     networks:
-      - secuflow-network
+      - homeservices-network
     depends_on:
       mysql:
         condition: service_healthy
@@ -80,5 +80,5 @@ volumes:
     driver: local
 
 networks:
-  secuflow-network:
+  homeservices-network:
     driver: bridge

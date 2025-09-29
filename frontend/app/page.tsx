@@ -28,7 +28,7 @@ export default function Home() {
   return (
     <main className="min-h-screen p-8 flex items-center justify-center">
       <Card className="p-6 w-full max-w-xl space-y-4">
-        <div className="text-xl font-semibold">Secuflow Frontend</div>
+        <div className="text-xl font-semibold">Home Services Frontend</div>
         <div className="text-sm text-muted-foreground">Health Check:</div>
         <pre className="rounded bg-muted p-4 text-sm overflow-auto">{message}</pre>
         <Button onClick={fetchHealth} disabled={loading}>

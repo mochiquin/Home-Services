@@ -45,7 +45,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'secuflow.config.urls'
+ROOT_URLCONF = 'homeservices.config.urls'
 
 TEMPLATES = [
     {
@@ -63,8 +63,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'secuflow.config.wsgi.application'
-ASGI_APPLICATION = 'secuflow.config.asgi.application'
+WSGI_APPLICATION = 'homeservices.config.wsgi.application'
+ASGI_APPLICATION = 'homeservices.config.asgi.application'
 
 # Database selection
 DATABASE_TYPE = config('DATABASE_TYPE', default='sqlite')
@@ -72,7 +72,7 @@ if DATABASE_TYPE == 'mysql':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
-            'NAME': config('MYSQL_DATABASE', default='secuflow'),
+            'NAME': config('MYSQL_DATABASE', default='homeservices'),
             'USER': config('MYSQL_USER', default='root'),
             'PASSWORD': config('MYSQL_PASSWORD', default='password'),
             'HOST': config('MYSQL_HOST', default='localhost'),

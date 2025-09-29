@@ -490,5 +490,5 @@ def health_check(request):
             'version': '1.0.0',
             'timestamp': timezone.now().isoformat()
         },
-        message='Secuflow User Management API is running'
+        message='Home Services User Management API is running'
     )

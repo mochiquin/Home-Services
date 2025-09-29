@@ -98,6 +98,6 @@ class UserProfileAdmin(admin.ModelAdmin):
     get_user_email.admin_order_field = 'user__email'
 
 # Customize admin site headers
-admin.site.site_header = 'Secuflow User Management System'
-admin.site.site_title = 'Secuflow Admin'
-admin.site.index_title = 'Welcome to Secuflow User Management Admin'
+admin.site.site_header = 'Home Services Management System'
+admin.site.site_title = 'Home Services Admin'
+admin.site.index_title = 'Welcome to Home Services Management Admin'
