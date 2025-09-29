@@ -27,25 +27,32 @@ logger = logging.getLogger(__name__)
 @log_api_call
 def login_view(request):
     """
-    User login endpoint - simplified with global exception handling.
-    Accepts email/password and returns JWT tokens with user information.
+    User login endpoint - KISS simplified.
     """
     email = request.data.get('email')
+    password = request.data.get('password')
 
-    # Use service layer for authentication
-    auth_result = UserService.authenticate_user(email, request.data.get('password'))
+    if not email or not password:
+        raise ValidationError("Email and password are required")
 
-    # Generate tokens
-    tokens = UserService.generate_tokens(auth_result['user'])
+    # Direct authentication
+    try:
+        user_obj = User.objects.get(email=email)
+    except User.DoesNotExist:
+        raise ValidationError("Invalid email or password")
 
-    return ApiResponse.success(
-        data={
-            'refresh': tokens['refresh'],
-            'access': tokens['access'],
-            'user': UserSerializer(auth_result['user']).data
-        },
-        message=auth_result['message']
-    )
+    user = authenticate(username=user_obj.username, password=password)
+    if not user or not user.is_active:
+        raise ValidationError("Invalid email or password")
+
+    # Direct token generation
+    refresh = RefreshToken.for_user(user)
+
+    return Response({
+        'refresh': str(refresh),
+        'access': str(refresh.access_token),
+        'user': UserSerializer(user).data
+    }, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -59,14 +66,11 @@ def register_view(request):
     # Use service layer for registration
     result = UserService.register_user(request.data)
 
-    return ApiResponse.created(
-        data={
-            'refresh': result['tokens']['refresh'],
-            'access': result['tokens']['access'],
-            'user': UserSerializer(result['user']).data
-        },
-        message=result['message']
-    )
+    return Response({
+        'refresh': result['tokens']['refresh'],
+        'access': result['tokens']['access'],
+        'user': UserSerializer(result['user']).data
+    }, status=status.HTTP_201_CREATED)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -84,9 +88,7 @@ def logout_view(request):
     # Use service layer for logout
     result = UserService.logout_user(refresh_token)
 
-    return ApiResponse.success(
-        message=result['message']
-    )
+    return Response({'message': result['message']}, status=status.HTTP_200_OK)
 
 class UserViewSet(viewsets.ModelViewSet):
     """

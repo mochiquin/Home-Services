@@ -4,7 +4,7 @@ Serializers for accounts app models.
 
 from rest_framework import serializers
 from django.contrib.auth import authenticate
-from .models import User, UserProfile, GitCredential
+from .models import User, UserProfile
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -29,82 +29,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['created_at', 'updated_at']
 
-
-class GitCredentialSerializer(serializers.ModelSerializer):
-    """Serializer for GitCredential model."""
-    
-    # Don't expose encrypted data in serialization
-    class Meta:
-        model = GitCredential
-        fields = [
-            'id', 'credential_type', 'provider', 'username', 
-            'is_active', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
-
-
-class GitCredentialCreateSerializer(serializers.Serializer):
-    """Serializer for creating Git credentials."""
-    
-    credential_type = serializers.ChoiceField(choices=GitCredential.CredentialType.choices)
-    provider = serializers.CharField(max_length=50, default='github')
-    
-    # For HTTPS token
-    token = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    
-    # For basic auth
-    username = serializers.CharField(required=False, allow_blank=True)
-    password = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    
-    # For SSH key
-    private_key = serializers.CharField(required=False, allow_blank=True, write_only=True)
-    ssh_username = serializers.CharField(required=False, default='git')
-    
-    def validate(self, data):
-        """Validate that required fields are provided based on credential type."""
-        credential_type = data.get('credential_type')
-        
-        if credential_type == GitCredential.CredentialType.HTTPS_TOKEN:
-            if not data.get('token'):
-                raise serializers.ValidationError("Token is required for HTTPS token authentication")
-        elif credential_type == GitCredential.CredentialType.BASIC_AUTH:
-            if not data.get('username') or not data.get('password'):
-                raise serializers.ValidationError("Username and password are required for basic authentication")
-        elif credential_type == GitCredential.CredentialType.SSH_KEY:
-            if not data.get('private_key'):
-                raise serializers.ValidationError("Private key is required for SSH authentication")
-        
-        return data
-    
-    def create(self, validated_data):
-        """Create a new Git credential."""
-        user_profile = self.context['request'].user.profile
-        credential_type = validated_data['credential_type']
-        provider = validated_data.get('provider', 'github')
-        
-        # Remove existing credential of same type and provider
-        GitCredential.objects.filter(
-            user_profile=user_profile,
-            provider=provider,
-            credential_type=credential_type
-        ).delete()
-        
-        # Create new credential
-        credential = GitCredential(
-            user_profile=user_profile,
-            credential_type=credential_type,
-            provider=provider
-        )
-        
-        if credential_type == GitCredential.CredentialType.HTTPS_TOKEN:
-            credential.set_token(validated_data['token'])
-        elif credential_type == GitCredential.CredentialType.BASIC_AUTH:
-            credential.set_basic_auth(validated_data['username'], validated_data['password'])
-        elif credential_type == GitCredential.CredentialType.SSH_KEY:
-            credential.set_ssh_key(validated_data['private_key'], validated_data.get('ssh_username', 'git'))
-        
-        credential.save()
-        return credential
 
 
 class LoginSerializer(serializers.Serializer):

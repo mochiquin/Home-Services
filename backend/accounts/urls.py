@@ -1,12 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
-from .git_views import GitCredentialViewSet
 
 # Create router for ViewSets
 router = DefaultRouter()
 router.register(r'users', views.UserViewSet)
-router.register(r'git-credentials', GitCredentialViewSet, basename='git-credentials')
 
 urlpatterns = [
     # Authentication endpoints

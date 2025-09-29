@@ -1,69 +1,52 @@
 """
-Services API Views
-
-This module provides API views for Home Services.
+KISS Services API - Simple and clean views.
 """
 
-from rest_framework import viewsets, status
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.filters import SearchFilter, OrderingFilter
+from common.decorators import api_exception_handler
 
-from .models import ServiceCategory, Service, ServiceRequirement, ServiceArea
+from .models import ServiceCategory, Service
 from .serializers import (
     ServiceCategorySerializer,
     ServiceSerializer,
-    ServiceRequirementSerializer,
-    ServiceAreaSerializer
+    ServiceCategoryListSerializer,
+    ServiceListSerializer
 )
 
 
 class ServiceCategoryViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing service categories.
-    """
+    """Simple service categories API."""
 
-    queryset = ServiceCategory.objects.all()
+    queryset = ServiceCategory.objects.filter(is_active=True)
     serializer_class = ServiceCategorySerializer
-    filter_backends = [SearchFilter, OrderingFilter]
-    filterset_fields = ['is_active']
-    search_fields = ['name', 'description']
-    ordering_fields = ['sort_order', 'name', 'created_at']
-    ordering = ['sort_order', 'name']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ServiceCategoryListSerializer
+        return ServiceCategorySerializer
 
 
 class ServiceViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing services.
-    """
+    """Simple services API."""
 
-    queryset = Service.objects.select_related('category').all()
+    queryset = Service.objects.select_related('category').filter(is_active=True)
     serializer_class = ServiceSerializer
-    filter_backends = [SearchFilter, OrderingFilter]
-    filterset_fields = ['category', 'is_active', 'requires_quote', 'price_unit']
-    search_fields = ['name', 'description', 'category__name']
-    ordering_fields = ['name', 'base_price', 'created_at']
-    ordering = ['category__sort_order', 'name']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return ServiceListSerializer
+        return ServiceSerializer
 
     @action(detail=False, methods=['get'])
-    def popular(self, request):
-        """Get popular services based on booking count."""
-        # This would typically involve aggregating booking data
-        # For now, return top services by category
-        popular_services = self.get_queryset()[:10]
-        serializer = self.get_serializer(popular_services, many=True)
+    @api_exception_handler
+    def by_category(self, request):
+        """Get services by category ID."""
+        category_id = request.query_params.get('category_id')
+        if not category_id:
+            return Response({'error': 'category_id required'}, status=400)
+
+        services = self.get_queryset().filter(category_id=category_id)
+        serializer = ServiceListSerializer(services, many=True)
         return Response(serializer.data)
-
-
-class ServiceAreaViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing service areas.
-    """
-
-    queryset = ServiceArea.objects.all()
-    serializer_class = ServiceAreaSerializer
-    filter_backends = [SearchFilter, OrderingFilter]
-    filterset_fields = ['state', 'country', 'is_active']
-    search_fields = ['name', 'state', 'postal_code']
-    ordering_fields = ['name', 'state']
-    ordering = ['state', 'name']
